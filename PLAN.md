@@ -11,7 +11,7 @@ v0.7 switched LoomViz to **opening a local folder, with git in the user's own to
 | M0 | Feasibility spike: WireViz as a library, render speed, YAML round trips | Done (results in `spike/README.md`); git and container parts dropped |
 | M1 | Back-end (launch token, file API, render service), live-preview page, document view, diagram selection | Done, except Docker (now M3) and CI |
 | M2 | Editor and workspace: Monaco, two-way selection, file tree, unsaved-edit recovery, live reload, git status, zoom/pan, resizable layout | Done (§4) |
-| **M3** | **Docker: one image, `compose.yaml` with the folder mounted, files owned by the user** | **Next; needs Docker on the dev machine** |
+| **M3** | **Docker: one image, `compose.yaml` with the folder mounted, files owned by the user** | **Next (§5); needs Docker on the dev machine** |
 | M4 | Forms (SPEC FR-25 to FR-28) | Later |
 | M5 | Export (FR-29), published image, docs, CI | Later (v1.0) |
 
@@ -117,13 +117,108 @@ Goal: SPEC §12's definition of done, minus Docker. Order: back-end first where 
 - Monaco adds ~3 MB to the bundle (810 KB gzipped), accepted for offline use.
 - Known gaps: clicking a wire's row inside the cable box selects the cable, not the wire; FR-32 selects components, not individual wires; mouse-wheel zooms (no wheel-to-scroll).
 
-## 5. Later milestones (outline)
+## 5. M3: Docker
 
-- **M3, Docker:** multi-stage image (Node build, then Python + Graphviz + git); `compose.yaml` mounting `${WORKSPACE}` at `/workspace`, port published on `127.0.0.1`, running as the host user (`user: "${UID}:${GID}"`), read-only root filesystem with tmpfs `/tmp`; file watching checked on Docker Desktop's bind mounts (polling fallback); smoke test.
+Goal: SPEC §12's Docker items. One command starts LoomViz in a container on a folder of the user's choice, and everything works as it does natively: live preview, document view, selection, file tree, live reload and git status. Files LoomViz writes belong to the user, and the app is only reachable from the user's own machine.
+
+Target user experience:
+
+```bash
+scripts/docker.sh ~/my-harnesses              # builds the image if needed, starts it, prints the URL
+WORKSPACE=~/my-harnesses docker compose up    # the same without the helper script
+```
+
+Design points that shape the steps:
+
+- **Ports and the Host check.** Inside the container the server listens on `0.0.0.0:8000`; compose publishes it as `127.0.0.1:${PORT:-8000}`. The Host/Origin checks must accept the *host-side* port the browser uses, so the server learns it through `LOOMVIZ_PUBLIC_PORT` (D18). Even if someone publishes the port on all interfaces, the Host check still rejects requests addressed to a LAN IP, and every request needs the token.
+- **File ownership.** The container runs as the host user (`user: "${UID}:${GID}"`), so files LoomViz writes into the mounted folder belong to the user on Linux. Docker Desktop on macOS maps ownership itself. `scripts/docker.sh` fills in `UID`/`GID`; plain compose users set them in `.env` (`.env.example` shows how).
+- **Git inside the container.** The image includes `git` for the read-only status. Git refuses to read repositories owned by another user ("dubious ownership"), which can happen with bind mounts, so the image's system git config marks `/workspace` as a safe directory. That's acceptable because LoomViz only reads (D16). Mount the **repository root**: if the mounted folder is a subfolder of a repository, or a git worktree whose metadata lives outside the mount, the header shows "not a git repository".
+- **Hardening.** Read-only root filesystem, tmpfs `/tmp` (also `HOME`, for Graphviz's font cache), `cap_drop: [ALL]`, `no-new-privileges`, `init: true` (reaps render workers killed on timeout), and no network access needed at run time.
+- **File watching on bind mounts.** inotify works on native Linux and usually through Docker Desktop's file sharing. If events don't arrive, `LOOMVIZ_POLL=1` switches watchfiles to polling (`WATCHFILES_FORCE_POLLING`); M3.4 checks which is needed.
+
+### M3.0 Prerequisite: Docker on the development machine
+- **Build:** nothing; install a Docker runtime (see Q7).
+- **Verify:** `docker version` shows a server; `docker compose version` works.
+- **Commit:** none.
+
+### M3.1 Container-friendly back-end settings
+- **Build:**
+  - `LOOMVIZ_PUBLIC_PORT`: the port the browser uses; defaults to `--port`. `allowed_hosts`, `allowed_origins` and the printed launch URL use it.
+  - `LOOMVIZ_FRONTEND_DIST`: where the built front-end lives, as an alternative to `--frontend-dist`, since the installed package can't find `frontend/dist` relative to itself inside the image.
+  - `LOOMVIZ_POLL=1`: sets `WATCHFILES_FORCE_POLLING` before the watchers start.
+  - The printed launch URL always says `127.0.0.1:<public port>`, even when listening on `0.0.0.0`.
+- **Verify:** `uv run pytest`: with `port=8000, public_port=8100`, a request with `Host: 127.0.0.1:8100` passes, `Host: 127.0.0.1:8000` is refused, and `Origin: http://localhost:8100` passes; the launch URL uses 8100; `LOOMVIZ_POLL=1` sets the watchfiles variable.
+- **Commit:** `backend: settings for running in a container`.
+
+### M3.2 Docker image
+- **Build:**
+  - `Dockerfile`, multi-stage:
+    1. `node:22-slim` with pnpm (corepack) runs `pnpm install --frozen-lockfile && pnpm build`;
+    2. `python:3.12-slim` installs `graphviz`, `fonts-dejavu-core` and `git` (apt, no recommends), copies `uv` from its official image, installs the back-end with `uv sync --frozen --no-dev` (bytecode compiled at build time, since the root filesystem is read-only at run time), and copies in the built front-end.
+  - `git config --system --add safe.directory /workspace`.
+  - Runs as a non-root default user (overridable by compose's `user:`), `HOME=/tmp`, `LOOMVIZ_ALLOW_REMOTE=1`, `LOOMVIZ_FRONTEND_DIST=/app/frontend`.
+  - Entrypoint `loomviz /workspace --host 0.0.0.0 --port 8000`.
+  - `HEALTHCHECK` opens a TCP connection to port 8000 (no new endpoint).
+  - `.dockerignore` keeps out `node_modules`, `.venv`, `spike/`, `.git` and build output.
+- **Verify:**
+  - `docker build -t loomviz:dev .` succeeds; `docker image ls loomviz:dev` shows the size (expected a few hundred MB, mostly Graphviz).
+  - `docker run --rm -p 127.0.0.1:8000:8000 -e LOOMVIZ_PUBLIC_PORT=8000 -v "$PWD/examples:/workspace" loomviz:dev` prints a launch URL; opening it shows `demo02.yml` rendered.
+  - `docker run --rm loomviz:dev dot -V` and `git --version` work inside the image.
+- **Commit:** `docker: multi-stage image`.
+
+### M3.3 compose.yaml and the one-command script
+- **Build:**
+  - `compose.yaml`: one service, built from the Dockerfile (image `loomviz:dev`), with:
+    - `${WORKSPACE:?set WORKSPACE to your harness folder}` mounted at `/workspace`;
+    - `ports: ["127.0.0.1:${PORT:-8000}:8000"]` and `LOOMVIZ_PUBLIC_PORT=${PORT:-8000}`;
+    - `user: "${UID:-1000}:${GID:-1000}"`;
+    - `read_only: true`, tmpfs `/tmp`, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, `init: true`;
+    - `restart: "no"`, plus optional `LOOMVIZ_TOKEN` and `LOOMVIZ_POLL`.
+  - `.env.example` documents `WORKSPACE`, `PORT`, `UID`, `GID`, `LOOMVIZ_TOKEN` and `LOOMVIZ_POLL`.
+  - `scripts/docker.sh [folder] [--port N] [--poll]`: resolves the folder to an absolute path, exports `WORKSPACE`, `UID`, `GID` and `PORT`, then runs `docker compose up --build`. The launch URL appears in the output; Ctrl+C stops the container.
+- **Verify:**
+  - `scripts/docker.sh examples` starts and prints `http://127.0.0.1:8000/?token=…`, and the page works.
+  - `scripts/docker.sh examples --port 8100` works on 8100, which proves `LOOMVIZ_PUBLIC_PORT`.
+  - `docker compose ps` shows the port bound to `127.0.0.1` only.
+  - `docker compose exec loomviz touch /x` fails (read-only filesystem), and `docker compose exec loomviz id -u` matches `id -u` on the host.
+  - Without `WORKSPACE`, `docker compose up` stops with the "set WORKSPACE" message.
+- **Commit:** `docker: compose file and scripts/docker.sh`.
+
+### M3.4 Behaviour on bind mounts
+- **Build:** fixes for whatever this step finds, plus notes in the README. Each check runs on a scratch git repository mounted into the container:
+  - **saving:** the file on the host is updated, owned by the user, and leaves no `.loomviz-tmp-*` files behind;
+  - **live reload:** an edit on the host and a `git checkout` on the host reach the page; if they don't arrive, polling is needed;
+  - **git status in the container:** the branch and the changed-file count match `git status` on the host, including when the host user and the container user differ (`safe.directory`);
+  - **images and templates:** a harness with an image in `loom/` and a custom template renders, and the document view works;
+  - **rendering timeouts:** a timed-out worker is reaped (no zombie processes, thanks to `init`).
+- **Verify:** each check above, on macOS. Linux too, if a machine or VM is available (Q8). Results recorded in the PLAN's M3 result note.
+- **Commit:** `docker: bind-mount fixes` (if any fixes are needed) and `docs: Docker notes`.
+
+### M3.5 Automated Docker smoke test
+- **Build:** `scripts/docker-smoke.sh`:
+  1. builds the image;
+  2. copies `examples/` to a temp git repository, starts the container on it with a fixed token and a random port, and waits for the healthcheck;
+  3. checks: `/api/session` with the token returns 200 and without it 401; a foreign Host header gets 403; `/api/git/status` reports `repository: true`; a file written through the API exists on the host, owned by the current user; editing a file on the host produces a `files` event on `/ws/events` (a few lines of Python with `websockets`, run with `uv run --project backend`); `node scripts/ui-smoke.mjs` passes against the container;
+  4. stops the container and removes the temp folder, even on failure.
+- **Verify:** `scripts/docker-smoke.sh` prints `PASS` for each check and exits 0; breaking something on purpose (e.g. dropping `LOOMVIZ_PUBLIC_PORT`) makes it fail.
+- **Commit:** `docker: smoke test`.
+
+### M3.6 Wrap-up
+- **Build:** README gets a "Run in Docker" section (one command, `.env`, ports, polling, mount the repository root, macOS/Linux notes); CLAUDE.md commands get `scripts/docker.sh` and `scripts/docker-smoke.sh`; SPEC §12 is checked off; the PLAN gets an M3 result note.
+- **Verify:** from a fresh clone, `scripts/docker-smoke.sh` passes, and `scripts/docker.sh examples` gives a working app.
+- **Commit:** `docs: M3 wrap-up`. Tag `v0.1.0` (SPEC §12 complete).
+
+**M3 exit criteria:**
+- SPEC §12 holds in Docker on macOS (and Linux if available).
+- `scripts/docker-smoke.sh` and all native tests pass.
+- Files written in Docker belong to the user, and the app is reachable only on `127.0.0.1`.
+
+## 6. Later milestones (outline)
+
 - **M4, forms:** JSON Schema reconnaissance (old M0.7), then forms with splice-based edits (D7).
-- **M5, v1.0:** export, published multi-arch image, CI, docs.
+- **M5, v1.0:** export, published multi-arch image (amd64 + arm64, GitHub Container Registry), CI (including the M3 Docker smoke test), docs.
 
-## 6. Resolved questions
+## 7. Questions
 
 | # | Question | Answer |
 |---|---|---|
@@ -133,8 +228,11 @@ Goal: SPEC §12's definition of done, minus Docker. Order: back-end first where 
 | Q4 | Test repository for the git spike | No longer needed (D16). |
 | Q5 | Repository workflow | Commit straight to `main`, one commit per step. CI waits for the GitHub repository. |
 | Q6 | Clone a repo, or open a local folder? | Open a local folder, served by the back-end; git in the user's own tools (D16). |
+| Q7 | **Open:** which Docker runtime on the Mac? | Proposal: **Docker Desktop**. It's the reference, so the README instructions match what most users run. Note: Docker Desktop needs a paid subscription for companies above 250 employees or $10M revenue; OrbStack or colima are drop-in alternatives (the same `docker compose` commands). |
+| Q8 | **Open:** is a Linux machine or VM available for testing? | Proposal: test on macOS in M3; Linux (where file ownership matters most) gets covered by CI in M5, which runs `scripts/docker-smoke.sh` on Ubuntu. |
+| Q9 | **Open:** build the image locally only, or also publish it? | Proposal: local builds in M3 (`docker compose up --build`); publishing to GitHub Container Registry waits for M5, together with CI and multi-arch builds. |
 
-## 7. Decision log
+## 8. Decision log
 
 | # | Decision | Why |
 |---|---|---|
@@ -153,3 +251,4 @@ Goal: SPEC §12's definition of done, minus Docker. Order: back-end first where 
 | D15 | **Interactive diagram:** the SVG is inserted inline after DOMPurify sanitising; the Document view stays in an `<iframe sandbox>` with a blocking CSP. | Selection needs DOM access; sanitising keeps the launch token out of reach. |
 | D16 | **Open a local folder; git stays in the user's tools.** The back-end serves the folder it was started on (natively, or mounted into Docker in M3). LoomViz shows read-only git status and reloads files changed on disk, but never runs git write commands, handles credentials or offers a terminal. | Much smaller and safer: no credential handling, no shell in the browser, no clone/push edge cases. Users already have git tools. Works in every browser, unlike the File System Access API (the other option considered), and supports file watching. |
 | D17 | **HTML document from the same harness**, with template names restricted to built-ins or files inside `loom/`. | One Graphviz run; WireViz resolves template names as file paths. |
+| D18 | **In Docker, Host/Origin checks use the host-side port** (`LOOMVIZ_PUBLIC_PORT`); the server listens on `0.0.0.0:8000` inside the container, and compose publishes it on `127.0.0.1` only. Git in the image treats `/workspace` as a safe directory. | The browser addresses the host port, which can differ from the container's; without it every request would be rejected. Marking `/workspace` safe is fine because LoomViz only reads git (D16). |
