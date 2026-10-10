@@ -10,6 +10,8 @@ SPEC FR-11 to FR-14 and FR-30; PLAN D14.
 - The HTML document (WireViz's own page: diagram, BOM, optional drawing template) is built
   from the same harness, so Graphviz runs once. Template names are restricted to plain names
   found inside loom/ or among WireViz's built-ins; WireViz would otherwise resolve them as paths.
+- Each wire's two Graphviz edges get ids (`wire-<cable>-<n>-a` left half, `-b` right half) before
+  Graphviz runs, and the response describes every wire as WireViz resolved it (FR-31).
 - Errors never raise to the client: the response is {"error", "line"} instead of {"svg"}.
 """
 
@@ -125,10 +127,68 @@ def _html_document(harness: Any, stem: str, custom_template: Path | None) -> str
     return html.replace(f"{tmp}/", "").replace(str(tmp), "")
 
 
+_ENDPOINT = re.compile(r'^(?:"((?:[^"\\]|\\.)*)"|([^":]+))(?::([^:]+))?(?::(?:[nsewc]{1,2}|_))?$')
+
+
+def _endpoint(text: str) -> tuple[str, str | None]:
+    """'X1:p1r:e' -> ('X1', 'p1r'); '"My X":p1r:e' -> ('My X', 'p1r')."""
+    m = _ENDPOINT.match(text)
+    if not m:
+        return text, None
+    name = m.group(1).replace('\\"', '"') if m.group(1) is not None else m.group(2)
+    return name, m.group(3)
+
+
+def _end_info(harness: Any, name: str | None, pin: Any) -> dict[str, Any] | None:
+    if name is None or pin is None:
+        return None
+    connector = harness.connectors[name]
+    label = None
+    if connector.pinlabels and pin in connector.pins:
+        index = connector.pins.index(pin)
+        label = connector.pinlabels[index] if index < len(connector.pinlabels) else None
+    return {"connector": name, "pin": pin, "label": label or None}
+
+
+def tag_wires(harness: Any) -> dict[str, dict[str, Any]]:
+    """Give each wire's Graphviz edges an id and describe every wire. Must run before harness.svg."""
+    body = harness.graph.body
+    for i, line in enumerate(body):
+        if " -- " not in line or "[" in line:
+            continue
+        left, right = (part.strip() for part in line.strip().split(" -- ", 1))
+        for (name, port), half in ((_endpoint(left), "b"), (_endpoint(right), "a")):
+            if name in harness.cables and port and port.startswith("w"):
+                wire_id = f"wire-{name}-{port[1:]}-{half}".replace('"', "")
+                body[i] = f'{line.rstrip()} [id="{wire_id}"]\n'
+                break
+
+    wires: dict[str, dict[str, Any]] = {}
+    for cable_name, cable in harness.cables.items():
+        for connection in cable.connections:
+            port = connection.via_port
+            key = f"{cable_name}-{port}"
+            info = wires.setdefault(
+                key,
+                {
+                    "cable": cable_name,
+                    "wire": port,
+                    "color": cable.colors[port - 1] if isinstance(port, int) and cable.colors else None,
+                    "gauge": f"{cable.gauge} {cable.gauge_unit}" if cable.gauge else None,
+                    "length": f"{cable.length} {cable.length_unit}" if cable.length else None,
+                    "from": None,
+                    "to": None,
+                },
+            )
+            info["from"] = info["from"] or _end_info(harness, connection.from_name, connection.from_pin)
+            info["to"] = info["to"] or _end_info(harness, connection.to_name, connection.to_pin)
+    return wires
+
+
 def render_job(
     yaml_text: str, base_dir: str, loom: str, want_html: bool = False, stem: str = "harness"
 ) -> dict[str, Any]:
-    """Render in a worker. Returns {"svg", "html"?, "warnings"} or {"error", "line", "kind"}."""
+    """Render in a worker. Returns {"svg", "html"?, "wires", "warnings"} or {"error", "line", "kind"}."""
     if os.environ.get("LOOMVIZ_TEST_HOOKS") == "1" and "# test:sleep" in yaml_text:
         time.sleep(60)
     from wireviz import wireviz
@@ -167,7 +227,8 @@ def render_job(
         with contextlib.redirect_stdout(captured):
             # A fresh image_paths list every time: wireviz.parse() mutates its default (spike §1).
             harness = wireviz.parse(data, return_types="harness", image_paths=[Path(base_dir)])
-            result: dict[str, Any] = {"svg": harness.svg}
+            wires = tag_wires(harness)
+            result: dict[str, Any] = {"svg": harness.svg, "wires": wires}
             if want_html:
                 result["html"] = _html_document(harness, stem, custom_template)
     except Exception as exc:  # wireviz raises bare Exception / TypeError for harness errors
