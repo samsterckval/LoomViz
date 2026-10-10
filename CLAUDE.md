@@ -11,12 +11,13 @@ LoomViz is a web front-end for [WireViz](https://github.com/wireviz/WireViz) (wi
 
 Read both before implementing anything. Work one PLAN step at a time: build, run its Verify check, then make the one commit it names, straight to `main`. When a change alters scope or a decision, update both files and keep their FR and D numbers consistent.
 
-## Commands (planned, per PLAN.md; update this section once they exist)
+## Commands
 
-- Back-end (in `backend/`, uv-managed): `uv run loomviz --dev-workspace ../examples/` runs against a local folder; lint with `uv run ruff check .` and `uv run mypy .`; test with `uv run pytest`, or a single test with `uv run pytest tests/test_x.py::test_name`.
-- Front-end (in `frontend/`, pnpm): `pnpm dev` (Vite dev server, proxies `/api` and `/ws`), `pnpm test` (Vitest), `pnpm lint`.
-- Full stack in Docker: `docker compose up` (the stateless production setup) or `docker compose -f compose.yaml -f compose.dev.yaml up` (reload + Vite dev server).
-- Git flow tests need the test git servers from `testing/git-servers/` running.
+- Whole app, development mode: `scripts/dev.sh [folder]` (builds the front-end, serves everything on 127.0.0.1:8000; default folder `examples/`).
+- Back-end (`backend/`, uv, Python 3.12): `uv run loomviz --dev-workspace ../examples`; `uv run pytest` (single test: `uv run pytest tests/test_render.py::test_renders_demo`); `uv run ruff check . && uv run ruff format --check .`; `uv run mypy loomviz`.
+- Front-end (`frontend/`, pnpm): `pnpm dev` (Vite on :5173, proxies `/api` to a back-end on :8000; open `http://localhost:5173/?token=<token the back-end printed>`); `pnpm test` (Vitest; single file: `pnpm vitest run tests/token.test.ts`); `pnpm lint` (ESLint + Prettier check); `pnpm build`. TypeScript is pinned to 6.x because typescript-eslint doesn't support TS 7 yet.
+- Spike (`spike/`): `uv run pytest`, `uv run python bench.py`; `spike/roundtrip-ts`: `pnpm test`.
+- Planned, not built yet: Docker (`docker compose up`), test git servers (`testing/git-servers/`).
 
 ## Architecture in brief
 

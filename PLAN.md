@@ -1,6 +1,15 @@
 # PLAN: LoomViz, M0 and M1
 
-Status: proposal, 2026-10-10, for [SPEC.md](SPEC.md) v0.5. SPEC says **what** LoomViz does; this file says **how**, **in what order** and **why**. It covers only the first two milestones. Later milestones are planned once M1 is done; the earlier full outline (M0–M7) is in commit `8eb109b`.
+Status: 2026-10-10, for [SPEC.md](SPEC.md) v0.5.
+
+**Progress:**
+- Done: M0.1–M0.6 (results in `spike/README.md`) and M1.1–M1.9. A working prototype runs with `scripts/dev.sh` (see README).
+- Deferred:
+  - M0.7, JSON Schema: needed only for forms (M5);
+  - M0.8–M0.10, locked-down container and git spike, plus M1.10, Docker image: Docker isn't installed on the development machine yet;
+  - M1.11, CI: waits for the GitHub repository;
+  - M1.12, wrap-up: done except the Docker parts.
+- Deviations: M1.1–M1.6 landed as one back-end commit. The preview uses a `data:` URL instead of a blob URL (simpler lifecycle, same isolation). Render workers are warmed up at start-up. SPEC says **what** LoomViz does; this file says **how**, **in what order** and **why**. It covers only the first two milestones. Later milestones are planned once M1 is done; the earlier full outline (M0–M7) is in commit `8eb109b`.
 
 All open questions are resolved; the answers are in §5.
 
@@ -229,6 +238,6 @@ Dockerfile, compose.dev.yaml
 | D9 | **No pull requests in v0.1.** | Keep v0.1 to the core loop. |
 | D10 | **v0.1 pushes to the cloned branch.** | Simplest flow; the terminal covers other branches. |
 | D11 | **Unsaved editor content in `sessionStorage`.** | Survives a reload, gone with the tab; never holds credentials. |
-| D12 | **SVG preview shown as `<img>` from a blob URL** (new, M1.8). | Diagrams are built from repository content; an `<img>` never runs scripts, so a malicious SVG can't reach the launch token. |
+| D12 | **SVG preview shown as an `<img>` (from a `data:` URL)**, never injected into the DOM (new, M1.8). | Diagrams are built from repository content; an `<img>` never runs scripts, so a malicious SVG can't reach the launch token. |
 | D13 | **Harness files live in a fixed `loom/` folder** at the repository root. The file tree and file API are sandboxed to it; the terminal and git see the whole repo. If it's missing, LoomViz offers to create it. The name is fixed in v0.1. | Separates harnesses from other YAML (CI workflows, compose files) without guessing, and gives the file API a tight sandbox root. |
 | D14 | **Images in the preview:** the render request carries the file's `path`; images resolve relative to it, are sandboxed to `loom/`, and are inlined into the SVG as data URIs. | The `<img>` preview (D12) can't load files by path, and inlining keeps the preview self-contained. |
