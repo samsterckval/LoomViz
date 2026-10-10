@@ -9,7 +9,7 @@ import {
 } from "./api/client";
 import { takeLaunchToken } from "./api/token";
 import { GitBadge } from "./GitBadge";
-import { locateComponent } from "./editor/locate";
+import { locateAt, locateComponent } from "./editor/locate";
 import { YamlEditor, type EditorMarker, type YamlEditorHandle } from "./editor/YamlEditor";
 import { createRenderScheduler, initialPreview, type PreviewState } from "./preview/renderScheduler";
 import { Preview, type PreviewView } from "./preview/Preview";
@@ -52,6 +52,7 @@ function Editor({ client }: { client: Client }) {
   const [view, setView] = useState<PreviewView>("diagram");
   const [selection, setSelection] = useState<Selection | null>(null);
   const editor = useRef<YamlEditorHandle>(null);
+  const cursorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const scheduler = useMemo(
     () => createRenderScheduler({ render: client.render, onUpdate: setPreview }),
@@ -159,6 +160,24 @@ function Editor({ client }: { client: Client }) {
     [preview.wires, revealLine, text],
   );
 
+  // Editor cursor → diagram (FR-32): select the component under the cursor, without moving the
+  // cursor (unlike a click in the diagram). Debounced so typing and arrow keys stay smooth.
+  const onCursor = useCallback(
+    (offset: number) => {
+      clearTimeout(cursorTimer.current);
+      cursorTimer.current = setTimeout(() => {
+        const designator = locateAt(text, offset);
+        setSelection((current) => {
+          if (!designator) return null;
+          if (current?.kind === "component" && current.designator === designator) return current;
+          return { kind: "component", designator };
+        });
+      }, 150);
+    },
+    [text],
+  );
+  useEffect(() => () => clearTimeout(cursorTimer.current), []);
+
   const switchTo = (path: string) => {
     if (dirty && !window.confirm(`Discard unsaved changes to ${open?.path}?`)) return;
     void openFile(path);
@@ -230,6 +249,7 @@ function Editor({ client }: { client: Client }) {
               initialText={text}
               markers={markers}
               highlightLines={highlightLines}
+              onCursor={onCursor}
               onChange={(next) => {
                 setText(next);
                 scheduler.schedule(next, open.path);

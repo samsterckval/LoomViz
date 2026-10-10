@@ -23,7 +23,13 @@ export function elementsFor(root: ParentNode, selection: Selection): Element[] {
     const prefix = `wire-${selection.key}-`.replace(/["\\]/g, "\\$&");
     return [...root.querySelectorAll(`g.edge[id^="${prefix}"]`)];
   }
-  return [...root.querySelectorAll("g.node")].filter(
-    (g) => g.querySelector(":scope > title")?.textContent?.trim() === selection.designator,
-  );
+  // The component's node, nodes WireViz generated from it as a template (`__F_1` for `F`), and,
+  // for a cable, its wires.
+  const name = selection.designator;
+  const nodes = [...root.querySelectorAll("g.node")].filter((g) => {
+    const title = g.querySelector(":scope > title")?.textContent?.trim() ?? "";
+    return title === name || (title.startsWith(`__${name}_`) && /^\d+$/.test(title.slice(name.length + 3)));
+  });
+  const prefix = `wire-${name}-`.replace(/["\\]/g, "\\$&");
+  return [...nodes, ...root.querySelectorAll(`g.edge[id^="${prefix}"]`)];
 }

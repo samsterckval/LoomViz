@@ -79,3 +79,58 @@ function matches(value: unknown, name: string): boolean {
   const text = String(value);
   return text === name || text === `${name}.`;
 }
+
+/**
+ * The reverse (SPEC FR-32): which connector or cable is the cursor on? Returns its designator
+ * (for a template entry like `F.`, the template name `F`), or null.
+ *
+ * Matches the cursor inside a component's definition (key or any of its attributes) or inside
+ * a connection-set entry (`- X1: [1-4]`, `- F.`).
+ */
+export function locateAt(yamlText: string, offset: number): string | null {
+  const doc = parseDocument(yamlText, { merge: true });
+  // A node's range starts at its first character; count the line's indentation (and an entry's
+  // "- ") as part of it, so a cursor at the start of the line still matches.
+  const lineStart = (at: number) => yamlText.lastIndexOf("\n", at - 1) + 1;
+  const inside = (start: number | undefined, end: number | undefined) =>
+    start !== undefined && end !== undefined && offset >= lineStart(start) && offset <= end;
+
+  // Ranges of neighbouring items touch (one ends where the next line starts), so the last
+  // match wins: at a boundary, the cursor is at the start of the later item.
+  let found: string | null = null;
+  for (const section of ["connectors", "cables"] as const) {
+    const map = doc.get(section, true);
+    if (!isMap(map)) continue;
+    for (const pair of map.items) {
+      if (!isScalar(pair.key) || !pair.key.range) continue;
+      const value = pair.value as Node | null;
+      const end = value?.range ? value.range[1] : pair.key.range[1];
+      if (inside(pair.key.range[0], end)) found = String(pair.key.value);
+    }
+  }
+  if (found) return found;
+
+  const connections = doc.get("connections", true);
+  if (isSeq(connections)) {
+    for (const set of connections.items) {
+      if (!isSeq(set)) continue;
+      for (const entry of set.items) {
+        if (isMap(entry)) {
+          for (const pair of entry.items) {
+            if (!isScalar(pair.key) || !pair.key.range) continue;
+            const value = pair.value as Node | null;
+            const end = value?.range ? value.range[1] : pair.key.range[1];
+            if (inside(pair.key.range[0], end)) found = stripTemplateDot(String(pair.key.value));
+          }
+        } else if (isScalar(entry) && entry.range && inside(entry.range[0], entry.range[1])) {
+          found = stripTemplateDot(String(entry.value));
+        }
+      }
+    }
+  }
+  return found;
+}
+
+function stripTemplateDot(name: string): string {
+  return name.endsWith(".") ? name.slice(0, -1) : name;
+}
