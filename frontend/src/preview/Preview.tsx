@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { withDocumentCsp } from "./document";
+import { PanZoom } from "./PanZoom";
 import type { PreviewState } from "./renderScheduler";
 import { sanitizeSvg } from "./sanitize";
 import { elementsFor, selectionFromElement, type Selection } from "./selection";
@@ -15,6 +16,7 @@ export function Preview({
   selection,
   onSelect,
   panel,
+  fitKey,
 }: {
   state: PreviewState;
   view: PreviewView;
@@ -22,6 +24,8 @@ export function Preview({
   selection: Selection | null;
   onSelect: (selection: Selection | null) => void;
   panel?: ReactNode;
+  /** Changes when another file is opened: the diagram fits to view again. */
+  fitKey: string;
 }) {
   const diagram = useRef<HTMLDivElement>(null);
   const safeSvg = useMemo(() => (state.svg ? sanitizeSvg(state.svg) : null), [state.svg]);
@@ -65,14 +69,16 @@ export function Preview({
         <>
           <div className={`canvas${state.error ? " stale" : ""}`}>
             {safeSvg ? (
-              <div
-                ref={diagram}
-                className="diagram"
-                role="img"
-                aria-label="Harness diagram; click a connector, cable or wire to find it in the YAML"
-                onClick={(e) => onSelect(selectionFromElement(e.target as Element))}
-                dangerouslySetInnerHTML={{ __html: safeSvg }}
-              />
+              <PanZoom fitKey={fitKey} contentKey={safeSvg}>
+                <div
+                  ref={diagram}
+                  className="diagram"
+                  role="img"
+                  aria-label="Harness diagram; click a connector, cable or wire to find it in the YAML"
+                  onClick={(e) => onSelect(selectionFromElement(e.target as Element))}
+                  dangerouslySetInnerHTML={{ __html: safeSvg }}
+                />
+              </PanZoom>
             ) : (
               !state.error && <p>Rendering…</p>
             )}

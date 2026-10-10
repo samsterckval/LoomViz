@@ -427,6 +427,7 @@ function Workbench({ client }: { client: Client }) {
         </section>
         <Preview
           state={preview}
+          fitKey={active ?? ""}
           selection={selection}
           onSelect={select}
           panel={
