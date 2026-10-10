@@ -4,36 +4,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-LoomViz is a web front-end for [WireViz](https://github.com/wireviz/WireViz) (wiring harness diagrams from YAML). The repository currently holds only the design documents; no code exists yet. Work starts at milestone M0 (feasibility spike).
+LoomViz is a web editor for [WireViz](https://github.com/wireviz/WireViz) wiring harness diagrams. It opens a local folder (usually a git repository) and edits the harness YAML in its `loom/` subfolder, with a live diagram; git stays in the user's own tools. A working prototype exists (M1); M2 is in progress.
 
-- [SPEC.md](SPEC.md): **what** LoomViz does. Requirements are numbered FR-1 to FR-29 and tagged with a release ("v0.1" or "later").
-- [PLAN.md](PLAN.md): **how**, **in what order** and **why**. It currently details only M0 and M1, step by step (what gets built, how to verify it, what gets committed), plus the decision log (D1–D12). Later milestones get planned after M1; the earlier M0–M7 outline is in commit `8eb109b`.
+- [SPEC.md](SPEC.md): **what** LoomViz does. Requirements FR-1 to FR-34, tagged by release; removed ones are kept as stubs so numbers stay stable.
+- [PLAN.md](PLAN.md): **how**, **in what order** and **why**: milestone table, M2 step by step (build, verify, commit), and the decision log (D1–D17; D16 is the switch to local folders).
 
-Read both before implementing anything. Work one PLAN step at a time: build, run its Verify check, then make the one commit it names, straight to `main`. When a change alters scope or a decision, update both files and keep their FR and D numbers consistent.
+Work one PLAN step at a time: build, run its Verify check, then make the one commit it names, straight to `main`. When a change alters scope or a decision, update SPEC and PLAN together and keep FR and D numbers consistent.
 
 ## Commands
 
-- Whole app, development mode: `scripts/dev.sh [folder]` (builds the front-end, serves everything on 127.0.0.1:8000; default folder `examples/`).
+- Whole app: `scripts/dev.sh [folder]` (builds the front-end, serves everything on 127.0.0.1:8000; default folder `examples/`).
 - Back-end (`backend/`, uv, Python 3.12): `uv run loomviz --dev-workspace ../examples`; `uv run pytest` (single test: `uv run pytest tests/test_render.py::test_renders_demo`); `uv run ruff check . && uv run ruff format --check .`; `uv run mypy loomviz`.
-- Front-end (`frontend/`, pnpm): `pnpm dev` (Vite on :5173, proxies `/api` to a back-end on :8000; open `http://localhost:5173/?token=<token the back-end printed>`); `pnpm test` (Vitest; single file: `pnpm vitest run tests/token.test.ts`); `pnpm lint` (ESLint + Prettier check); `pnpm build`. TypeScript is pinned to 6.x because typescript-eslint doesn't support TS 7 yet.
+- Front-end (`frontend/`, pnpm): `pnpm dev` (Vite on :5173, proxies `/api` and `/ws` to a back-end on :8000; open `http://localhost:5173/?token=<token the back-end printed>`); `pnpm test` (Vitest; single file: `pnpm vitest run tests/token.test.ts`); `pnpm lint` (ESLint + Prettier check); `pnpm build`. TypeScript is pinned to 6.x because typescript-eslint doesn't support TS 7 yet.
 - Spike (`spike/`): `uv run pytest`, `uv run python bench.py`; `spike/roundtrip-ts`: `pnpm test`.
-- Planned, not built yet: Docker (`docker compose up`), test git servers (`testing/git-servers/`).
+- Not built yet: Docker (M3).
 
 ## Architecture in brief
 
-One Docker container: a FastAPI back-end (Python 3.12) that imports the `wireviz` library, serves a React + TypeScript front-end (Monaco editor, SVG preview, xterm.js terminal), and runs git through the `git` CLI. A session is: clone a repo with a git token → edit → commit/push to the cloned branch → "End session" wipes everything and exits the process, which stops the container.
+A FastAPI back-end (Python 3.12, `backend/loomviz/`) is started on a folder. It serves the built React + TypeScript front-end (`frontend/`), a file API confined to `loom/`, a render service that runs the `wireviz` library in worker processes, and (M2) read-only git status and a file-change WebSocket.
 
 Invariants that span many files and are easy to break:
 
-- **Stateless container.** Read-only root filesystem, no volumes; all writable paths are tmpfs (`/workspace` for the working tree, `/run/loomviz` for credentials and git config, `/tmp`, `$HOME`). Never write anywhere else, and never add a volume.
-- **Credentials never touch the repo.** Author identity and `credential.helper` live in `GIT_CONFIG_GLOBAL=/run/loomviz/gitconfig`; the helper reads `/run/loomviz/credentials`. Nothing goes in `.git/config` or the remote URL. Git output is scrubbed of the token before it reaches logs or the browser. Logs persist after the container stops, so never log credentials, file contents or repo URLs.
-- **Git commands started by the back-end** always pass `-c core.hooksPath=/dev/null -c protocol.allow=never -c protocol.https.allow=always`, run with `GIT_TERMINAL_PROMPT=0`, and never fetch submodules. The terminal PTY gets the same `GIT_CONFIG_GLOBAL` environment so git works there without setup.
-- **Two different tokens.** The *launch token* authenticates the browser to LoomViz (required on every HTTP/WS request, together with Origin/Host checks). The *git token* authenticates to the git host. Don't conflate them.
-- **Dev mode** (`--dev-workspace <dir>`) starts with a session already open on a local folder: no clone, no credentials, no deletion on exit. All other code paths must stay identical to a real session; the Docker image never uses it.
-- **Work state** is split: the back-end reports uncommitted/unpushed (and pushes updates over `WS /ws/session`); the browser adds "unsaved" from its editor buffers. End-session checks both.
-- **Rendering** runs wireviz in a process pool with a timeout and an in-memory cache keyed by YAML hash + WireViz version. Renders use the editor buffer, not the saved file, and errors must never blank the last good diagram. Images referenced by relative path resolve against the edited file's `path`, stay inside `loom/`, and are inlined as data URIs. Diagram and document are untrusted (built from repo content): the SVG goes into the page only through `sanitizeSvg` (`frontend/src/preview/sanitize.ts`), and WireViz's HTML document only into an `<iframe sandbox="">` with the blocking CSP from `document.ts`. WireViz template names are restricted (`check_template` in `render.py`) because WireViz resolves them as file paths.
-- **Selection (FR-31)** relies on ids the back-end adds before Graphviz runs (`wire-<cable>-<n>-a|b`, see `tag_wires`) and on node `<title>`s; the `wires` map in the render result is WireViz's own resolution of each wire, and `frontend/src/editor/locate.ts` maps designators to YAML lines.
-- **File access** goes through one path-sandboxing function rooted at `<working tree>/loom/` (harness files live only there; D13), with atomic writes and ETag/If-Match conflict detection. The terminal and git still operate on the whole repository.
-- **YAML editing (M5 forms)** happens in the browser with the `yaml` npm package, parsed with `{ merge: true }` (WireViz files use repeated `<<` merge keys), and is applied as text splices at node ranges. Never re-serialise a whole document (`toString()`, ruamel `dump`): both rewrite WireViz's nested connection-list layout. The back-end never writes YAML through ruamel, and can't rely on ruamel to load every file (it rejects repeated `<<` keys); wireviz itself parses with PyYAML. Evidence: `spike/README.md`.
+- **Security baseline.** Every `/api` and `/ws` request needs the launch token (Bearer header on HTTP, `?token=` on WebSockets) and passes Host/Origin checks (`security.py`); the server binds to loopback unless `LOOMVIZ_ALLOW_REMOTE=1`. Don't add endpoints outside `/api` or `/ws` that return data.
+- **File access** goes through `Workspace.resolve` in `files.py`, rooted at `<workspace>/loom/` (D13): no `..`, absolute paths, hidden files or symlinks escaping it. Writes are atomic with ETag/If-Match conflict detection. LoomViz never writes outside `loom/`.
+- **Git is read-only** (D16). Never add a git command that writes (commit, checkout, pull, config, …). Git runs with `GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0`, `-c core.fsmonitor=false`, a timeout and no shell.
+- **Rendering** (`render.py`) runs wireviz in a spawn-based process pool with a timeout and an LRU cache keyed by content (YAML, path, WireViz version, referenced images, html flag). It renders the editor buffer, not the saved file, and errors never blank the last good diagram. `wireviz.parse()` mutates its default `image_paths`, so always pass a fresh list. Images resolve against the edited file's folder, stay inside `loom/`, and are inlined as data URIs. WireViz template names are restricted (`check_template`) because WireViz resolves them as file paths.
+- **Untrusted output.** Diagram SVG and HTML document are built from file content: the SVG goes into the page only through `sanitizeSvg` (`frontend/src/preview/sanitize.ts`), and the HTML only into an `<iframe sandbox="">` with the blocking CSP from `document.ts`.
+- **Selection** (FR-31, FR-32) relies on ids the back-end adds before Graphviz runs (`wire-<cable>-<n>-a|b`, see `tag_wires`) and on node `<title>`s; the render result's `wires` map is WireViz's own resolution of each wire; `frontend/src/editor/locate.ts` maps between designators and YAML positions.
+- **YAML in the front-end** is parsed with the `yaml` package and `{ merge: true }` (WireViz files use repeated `<<` merge keys). Edits LoomViz makes itself (forms, M4) are text splices at node ranges; never re-serialise a whole document (`toString()`, ruamel `dump`), which rewrites WireViz's nested connection-list layout. The back-end never writes YAML through ruamel. Evidence: `spike/README.md`.
 
 License: GPL-3.0 (WireViz is GPL-3.0 and is imported as a library).
