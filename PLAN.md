@@ -203,6 +203,31 @@ Design points that shape the steps:
 - **Verify:** `scripts/docker-smoke.sh` prints `PASS` for each check and exits 0; breaking something on purpose (e.g. dropping `LOOMVIZ_PUBLIC_PORT`) makes it fail.
 - **Commit:** `docker: smoke test`.
 
+### M3.7 LAN access (SPEC FR-35, D19)
+- **Build:**
+  - **Back-end settings:**
+    - `LOOMVIZ_ALLOWED_HOSTS` (comma-separated names or IPs): accepted in the Host/Origin checks next to the loopback names, with the browser port;
+    - `LOOMVIZ_TLS_CERT` / `LOOMVIZ_TLS_KEY`: serve HTTPS (uvicorn's TLS); Origins then use `https://`;
+    - the launch URLs are printed for every allowed host.
+  - **CLI:**
+    - `loomviz <folder> --lan`: listens on `0.0.0.0`, and adds the machine's host name, FQDN, `<name>.local` and non-loopback IP addresses to the allowed hosts;
+    - `--allow-host NAME` (repeatable), plus `--tls-cert` / `--tls-key`;
+    - `--lan` without TLS prints a warning that the token travels unencrypted.
+  - **Docker:**
+    - compose's port binding becomes `${BIND_ADDRESS:-127.0.0.1}`;
+    - `compose.tls.yaml` mounts a certificate and key read-only and sets the TLS variables;
+    - `scripts/docker.sh --lan [--allow-host NAME] [--tls CERT KEY]` sets `BIND_ADDRESS=0.0.0.0` and fills `LOOMVIZ_ALLOWED_HOSTS` with the *host's* names and IPs, which the container can't see itself.
+  - **`scripts/dev.sh`** passes `--lan` and the TLS options through.
+  - **Docs:**
+    - Docker publishes ports past host firewalls such as ufw;
+    - `mkcert` is an easy way to get a certificate that browsers trust;
+    - an SSH tunnel remains the alternative to LAN mode.
+- **Verify:**
+  - `uv run pytest`: allowed hosts and Origins (http and https), LAN host detection, TLS settings (both or neither), the plain-HTTP warning, and launch URLs.
+  - Natively on the Mac: `loomviz examples --lan` is reachable at the Mac's LAN IP, a made-up Host still gets 403, and with a self-signed certificate it serves HTTPS.
+  - `scripts/docker-smoke.sh --native --lan [--tls]` passes; the same flags on the Linux machine.
+- **Commit:** `backend: opt-in LAN access with optional TLS` and `docker: LAN and TLS options`.
+
 ### M3.6 Wrap-up
 - **Build:** README gets a "Run in Docker" section (one command, `.env`, ports, polling, mount the repository root, macOS/Linux notes); CLAUDE.md commands get `scripts/docker.sh` and `scripts/docker-smoke.sh`; SPEC §12 is checked off; the PLAN gets an M3 result note.
 - **Verify:** from a fresh clone, `scripts/docker-smoke.sh` passes, and `scripts/docker.sh examples` gives a working app.
@@ -267,3 +292,4 @@ Fixes from that run go in as `docker: …` commits. When the smoke test passes, 
 | D16 | **Open a local folder; git stays in the user's tools.** The back-end serves the folder it was started on (natively, or mounted into Docker in M3). LoomViz shows read-only git status and reloads files changed on disk, but never runs git write commands, handles credentials or offers a terminal. | Much smaller and safer: no credential handling, no shell in the browser, no clone/push edge cases. Users already have git tools. Works in every browser, unlike the File System Access API (the other option considered), and supports file watching. |
 | D17 | **HTML document from the same harness**, with template names restricted to built-ins or files inside `loom/`. | One Graphviz run; WireViz resolves template names as file paths. |
 | D18 | **In Docker, Host/Origin checks use the host-side port** (`LOOMVIZ_PUBLIC_PORT`); the server listens on `0.0.0.0:8000` inside the container, and compose publishes it on `127.0.0.1` only. Git in the image treats `/workspace` as a safe directory. | The browser addresses the host port, which can differ from the container's; without it every request would be rejected. Marking `/workspace` safe is fine because LoomViz only reads git (D16). |
+| D19 | **LAN access is opt-in (`--lan`), token-protected, HTTPS optional.** Allowed host names are explicit (detected plus `--allow-host`), so the Host check keeps blocking DNS rebinding. Without a certificate LoomViz serves plain HTTP and warns. | The user wants to open LoomViz from other machines on their network. Forcing HTTPS would require a certificate before LAN mode works at all; making it optional keeps setup simple on a trusted home network, while the warning and docs make the trade-off visible. |

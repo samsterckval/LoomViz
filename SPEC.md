@@ -1,6 +1,6 @@
 # SPEC: LoomViz, a web-based WireViz editor
 
-Status: draft v0.7 (2026-10-10). This file says **what** LoomViz does. [PLAN.md](PLAN.md) says how and in what order we build it, and records the reasoning behind each decision.
+Status: draft v0.8 (2026-10-10). v0.8 adds opt-in access from the local network (FR-35). This file says **what** LoomViz does. [PLAN.md](PLAN.md) says how and in what order we build it, and records the reasoning behind each decision.
 
 v0.7 changes the model: LoomViz now **opens a folder on the user's machine**, and **git happens in the user's own tools** (VS Code, GitHub Desktop, the command line). Cloning, credentials, commit/push from the UI and the terminal are gone (PLAN D16). Requirement numbers are kept stable, so removed ones are marked as such.
 
@@ -39,7 +39,7 @@ Non-goals for v1:
 - Any git write operation (commit, push, pull, branch). LoomViz only reads git status.
 - Cloning repositories or handling git credentials.
 - A terminal in the browser.
-- Multi-user collaboration or hosted multi-tenant use. LoomViz is single-user and runs locally.
+- Multi-user collaboration or hosted multi-tenant use. LoomViz is single-user; it runs locally, and can be opened from other machines on the user's own network (FR-35).
 - Replacing WireViz's renderer or YAML format.
 - Mobile layout.
 
@@ -92,6 +92,7 @@ One page:
 ### 8.1 Workspace
 - **FR-33** (v0.1): LoomViz is started on a folder (`loomviz <folder>`). If the folder has no `loom/` subfolder, the UI says so and offers to create it.
 - **FR-34** (v0.1): The header shows the git branch and the number of files under `loom/` with uncommitted changes (modified, added, deleted or untracked), refreshed when files change. If the workspace isn't a git repository, it says so. LoomViz only ever runs read-only git commands.
+- **FR-35** (v0.1): **LAN access, opt-in.** Started with `--lan` (natively) or `scripts/docker.sh --lan`, LoomViz is reachable from other machines on the local network, at the machine's host names and IP addresses (detected, plus any the user adds). The launch token is still required, and requests addressed to any other host name are still refused. With a TLS certificate and key, LoomViz serves HTTPS; without them it serves plain HTTP and warns that the token travels unencrypted on the network. Without `--lan`, nothing changes: local access only.
 - **FR-1 to FR-6**: *Removed in v0.7* (open-project form, clone, credentials, SSH; see PLAN D16).
 
 ### 8.2 Files and editing
@@ -125,12 +126,12 @@ One page:
 ## 9. Non-functional requirements
 
 - **Security:** LoomViz can read and write files in the user's folder, so:
-  - it listens on `127.0.0.1` only (in Docker: the port is published on `127.0.0.1` only);
+  - by default it listens on `127.0.0.1` only (in Docker: the port is published on `127.0.0.1` only); LAN access (FR-35) is an explicit opt-in;
   - every HTTP and WebSocket request needs the launch token and passes Origin/Host checks;
   - file access is confined to the loom folder (no `..`, absolute paths or symlinks escaping it);
   - git commands are read-only, run with a timeout and with repository-configured helpers disabled where possible;
   - diagrams and documents are built from file content, so they are treated as untrusted: the Diagram view inserts the SVG into the page only after sanitising it (no scripts, event handlers, external references or embedded HTML), and the Document view runs in a sandboxed frame with scripts and external loads blocked;
-  - any non-local deployment needs real authentication first and is out of scope for v1.
+  - LAN access relies on the launch token alone (no user accounts), so it's meant for the user's own, trusted network; HTTPS is supported and recommended there, and exposure to the internet stays out of scope for v1.
 - **Performance:** a typical harness (under ~20 connectors) renders in under 1 s end to end. Large harnesses may take a few seconds but never freeze the UI.
 - **Ease of use:** one command starts the complete app: `scripts/dev.sh <folder>` natively, or `docker compose up` with the folder configured.
 - **Portability:** macOS and Linux natively (needs Python via uv, Node/pnpm for building, Graphviz); Docker on Linux and macOS (amd64 and arm64); Windows via WSL or Docker Desktop is acceptable. In Docker, files written to the mounted folder are owned by the user, not root.
