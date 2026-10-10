@@ -101,6 +101,8 @@ def test_cli_lan_mode(monkeypatch, capsys, tmp_path):
 def test_cli_default_is_local_only(monkeypatch, capsys, tmp_path):
     run, out = run_cli(monkeypatch, capsys, tmp_path)
     assert run["host"] == "127.0.0.1"
+    # Open tabs hold a WebSocket; without a limit, Ctrl+C / docker stop would wait forever.
+    assert run["timeout_graceful_shutdown"] == 3
     assert "or:" not in out and "Warning" not in out
 
 

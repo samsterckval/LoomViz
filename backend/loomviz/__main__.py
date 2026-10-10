@@ -87,6 +87,9 @@ def main() -> None:
         port=settings.port,
         access_log=False,
         log_level="warning",
+        # Open tabs keep a /ws/events connection; without a limit, uvicorn waits for them forever
+        # on Ctrl+C or `docker stop`.
+        timeout_graceful_shutdown=3,
         ssl_certfile=str(settings.tls_cert) if settings.tls_cert else None,
         ssl_keyfile=str(settings.tls_key) if settings.tls_key else None,
     )
