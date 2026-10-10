@@ -18,4 +18,4 @@ cd "$repo/frontend"
 pnpm --silent build >/dev/null
 
 cd "$repo/backend"
-exec uv run loomviz --dev-workspace "$workspace" "${@:2}"
+exec uv run loomviz "$workspace" "${@:2}"

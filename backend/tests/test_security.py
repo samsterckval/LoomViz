@@ -72,3 +72,11 @@ def test_bind_rules(monkeypatch):
 
 def test_base_url_matches_allowed_host():
     assert BASE_URL == "http://127.0.0.1:8000"
+
+
+def test_session_payload(client):
+    assert client.get("/api/session").json() == {
+        "state": "open",
+        "workspace": "repo",
+        "loom_folder_exists": True,
+    }

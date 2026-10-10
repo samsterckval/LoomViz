@@ -28,10 +28,9 @@ export interface FileList {
 }
 
 export interface Session {
-  state: "none" | "cloning" | "open" | "ending";
-  repo?: string;
-  branch?: string | null;
-  dev?: boolean;
+  state: "none" | "open";
+  workspace?: string; // folder name
+  loom_folder_exists?: boolean;
 }
 
 export class ApiError extends Error {
@@ -64,6 +63,10 @@ export function createClient(token: string, fetchFn: typeof fetch = fetch.bind(g
   return {
     async session(): Promise<Session> {
       return (await call("/api/session")).json();
+    },
+    /** Create the loom/ folder in the workspace (SPEC FR-33). */
+    async createLoomFolder(): Promise<void> {
+      await call("/api/loom", { method: "POST" });
     },
     async listFiles(): Promise<FileList> {
       return (await call("/api/files")).json();

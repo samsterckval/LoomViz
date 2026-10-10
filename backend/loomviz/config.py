@@ -16,8 +16,8 @@ def _default_frontend_dist() -> Path:
 
 @dataclass
 class Settings:
-    # Development mode: a session is already open on this folder (a repository root).
-    dev_workspace: Path | None = None
+    # The folder LoomViz serves (usually a git repository root with a loom/ folder). None only in tests.
+    workspace: Path | None = None
     host: str = "127.0.0.1"
     port: int = 8000
     token: str = field(default_factory=lambda: os.environ.get("LOOMVIZ_TOKEN") or secrets.token_urlsafe(32))

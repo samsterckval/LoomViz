@@ -30,7 +30,7 @@ def workspace(tmp_path: Path) -> Path:
 
 def make_client(workspace: Path | None, tmp_path: Path, **overrides) -> TestClient:
     settings = Settings(
-        dev_workspace=workspace,
+        workspace=workspace,
         token=TOKEN,
         frontend_dist=overrides.pop("frontend_dist", tmp_path / "no-dist"),
         **overrides,

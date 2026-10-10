@@ -107,3 +107,14 @@ def test_delete(client):
     assert client.delete("/api/files/sub/small.yaml").status_code == 204
     assert client.get("/api/files/sub/small.yaml").status_code == 404
     assert client.delete("/api/files/sub/small.yaml").status_code == 404
+
+
+def test_create_loom_folder(client, workspace):
+    import shutil
+
+    shutil.rmtree(workspace / "loom")
+    assert client.get("/api/session").json()["loom_folder_exists"] is False
+    assert client.post("/api/loom").json() == {"loom_folder": "loom", "loom_folder_exists": True}
+    assert (workspace / "loom").is_dir()
+    assert client.post("/api/loom").status_code == 200  # idempotent
+    assert client.get("/api/files").json()["files"] == []

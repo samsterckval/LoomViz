@@ -28,7 +28,7 @@ class RenderBody(BaseModel):
 
 
 def create_app(settings: Settings) -> FastAPI:
-    workspace = Workspace(settings.dev_workspace) if settings.dev_workspace else None
+    workspace = Workspace(settings.workspace) if settings.workspace else None
     renderer = (
         Renderer(
             workspace.loom,
@@ -66,13 +66,23 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(409, "No session is open")
         return renderer
 
-    # -- session (M1: development mode only; cloning arrives in M3) -----------------------------
+    # -- workspace (FR-33) ----------------------------------------------------------------------
 
     @app.get("/api/session")
     def get_session() -> dict[str, Any]:
         if workspace is None:
             return {"state": "none"}
-        return {"state": "open", "repo": workspace.root.name, "branch": None, "dev": True}
+        return {
+            "state": "open",
+            "workspace": workspace.root.name,
+            "loom_folder_exists": workspace.loom.is_dir(),
+        }
+
+    @app.post("/api/loom")
+    def create_loom_folder() -> dict[str, Any]:
+        ws = open_workspace()
+        ws.loom.mkdir(exist_ok=True)
+        return {"loom_folder": LOOM_FOLDER, "loom_folder_exists": True}
 
     # -- files ----------------------------------------------------------------------------------
 

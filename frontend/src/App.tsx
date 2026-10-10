@@ -157,8 +157,7 @@ function Editor({ client }: { client: Client }) {
     <div className="app">
       <header>
         <strong>LoomViz</strong>
-        <span className="repo">{session.repo}</span>
-        {session.dev && <span className="badge">dev mode</span>}
+        <span className="repo">{session.workspace}</span>
         <select
           value={open?.path ?? ""}
           onChange={(e) => switchTo(e.target.value)}
@@ -186,9 +185,26 @@ function Editor({ client }: { client: Client }) {
       </header>
       {files.files.length === 0 ? (
         <main className="message">
-          {files.loom_folder_exists
-            ? `No .yml files in ${files.loom_folder}/ yet.`
-            : `This repository has no ${files.loom_folder}/ folder. Harness files belong there.`}
+          {files.loom_folder_exists ? (
+            `No .yml files in ${files.loom_folder}/ yet.`
+          ) : (
+            <>
+              <p>
+                This folder has no <code>{files.loom_folder}/</code> subfolder yet. LoomViz keeps harness
+                files there.
+              </p>
+              <button
+                onClick={() =>
+                  void client
+                    .createLoomFolder()
+                    .then(() => client.listFiles())
+                    .then(setFiles)
+                }
+              >
+                Create {files.loom_folder}/ folder
+              </button>
+            </>
+          )}
         </main>
       ) : (
         <div className="panes">
