@@ -43,6 +43,20 @@ COMPONENT_SECTIONS = ("connectors", "cables")
 # --- worker side (runs in a child process) ----------------------------------------------------
 
 
+def _exit_with_parent(parent_pid: int) -> None:
+    """Worker initializer: exit when the server process is gone (killed, crashed), instead of
+    lingering as an orphan. A clean shutdown stops the workers anyway."""
+    import threading
+
+    def watch() -> None:
+        while True:
+            time.sleep(1)
+            if os.getppid() != parent_pid:
+                os._exit(0)
+
+    threading.Thread(target=watch, daemon=True, name="exit-with-parent").start()
+
+
 def _image_refs(data: Any) -> list[tuple[dict[str, Any], str]]:
     """(image dict, src) for every component with `image: {src: ...}`."""
     refs = []
@@ -295,7 +309,12 @@ class Renderer:
         self._pool = self._new_pool()
 
     def _new_pool(self) -> ProcessPoolExecutor:
-        return ProcessPoolExecutor(max_workers=self.workers, mp_context=multiprocessing.get_context("spawn"))
+        return ProcessPoolExecutor(
+            max_workers=self.workers,
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_exit_with_parent,
+            initargs=(os.getpid(),),
+        )
 
     def _restart_pool(self) -> None:
         old = self._pool
