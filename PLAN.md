@@ -11,7 +11,7 @@ v0.7 switched LoomViz to **opening a local folder, with git in the user's own to
 | M0 | Feasibility spike: WireViz as a library, render speed, YAML round trips | Done (results in `spike/README.md`); git and container parts dropped |
 | M1 | Back-end (launch token, file API, render service), live-preview page, document view, diagram selection | Done, except Docker (now M3) and CI |
 | M2 | Editor and workspace: Monaco, two-way selection, file tree, unsaved-edit recovery, live reload, git status, zoom/pan, resizable layout | Done (§4) |
-| **M3** | **Docker: one image, `compose.yaml` with the folder mounted, files owned by the user** | **Next (§5); needs Docker on the dev machine** |
+| **M3** | **Docker: one image, `compose.yaml` with the folder mounted, files owned by the user** | **Written, untested on Docker (§5); the user tests on Linux** |
 | M4 | Forms (SPEC FR-25 to FR-28) | Later |
 | M5 | Export (FR-29), published image, docs, CI | Later (v1.0) |
 
@@ -136,9 +136,9 @@ Design points that shape the steps:
 - **Hardening.** Read-only root filesystem, tmpfs `/tmp` (also `HOME`, for Graphviz's font cache), `cap_drop: [ALL]`, `no-new-privileges`, `init: true` (reaps render workers killed on timeout), and no network access needed at run time.
 - **File watching on bind mounts.** inotify works on native Linux and usually through Docker Desktop's file sharing. If events don't arrive, `LOOMVIZ_POLL=1` switches watchfiles to polling (`WATCHFILES_FORCE_POLLING`); M3.4 checks which is needed.
 
-### M3.0 Prerequisite: Docker on the development machine
-- **Build:** nothing; install a Docker runtime (see Q7).
-- **Verify:** `docker version` shows a server; `docker compose version` works.
+### M3.0 Prerequisite: Docker on the test machine
+- **Build:** nothing. Docker isn't installed on the development Mac; testing happens on a separate Linux machine (Q8).
+- **Verify:** there, `docker version` shows a server and `docker compose version` works.
 - **Commit:** none.
 
 ### M3.1 Container-friendly back-end settings
@@ -208,6 +208,21 @@ Design points that shape the steps:
 - **Verify:** from a fresh clone, `scripts/docker-smoke.sh` passes, and `scripts/docker.sh examples` gives a working app.
 - **Commit:** `docs: M3 wrap-up`. Tag `v0.1.0` (SPEC §12 complete).
 
+**M3 status (2026-10-10):** written without a Docker host (Q8). Done and checked as far as possible here:
+- **M3.1** fully tested (unit tests, plus a native run behind a simulated port mapping);
+- **M3.2** the image's pnpm and uv install steps run natively from a clean export, and the result, started with the image's environment, passes `scripts/ui-smoke.mjs`;
+- **M3.3** `compose.yaml` validated with the `docker compose` v2.40 binary (no daemon) in all configurations; `scripts/docker.sh` exercised against a stand-in `docker`; shellcheck and hadolint clean;
+- **M3.4** folded into the smoke test;
+- **M3.5** `scripts/docker-smoke.sh --native` passes every non-container check, UI included;
+- **not yet run anywhere:** the Docker build itself, the container-only checks, and bind-mount behaviour on Linux.
+
+**Linux test (to do on the separate machine):**
+1. `git clone …; cd LoomViz; scripts/docker-smoke.sh` and report its output. The first build takes a few minutes.
+2. If the live-reload check fails, run `scripts/docker-smoke.sh --poll`; if that passes, make polling the default, or document it.
+3. `scripts/docker.sh ~/some-harness-repo`, open the URL, and try the M2 features by hand, including a `git pull` or `git checkout` on the host while LoomViz is open.
+4. If the machine has SELinux enforcing: `scripts/docker-smoke.sh --selinux`.
+Fixes from that run go in as `docker: …` commits. When the smoke test passes, tag `v0.1.0`.
+
 **M3 exit criteria:**
 - SPEC §12 holds in Docker on macOS (and Linux if available).
 - `scripts/docker-smoke.sh` and all native tests pass.
@@ -218,7 +233,7 @@ Design points that shape the steps:
 - **M4, forms:** JSON Schema reconnaissance (old M0.7), then forms with splice-based edits (D7).
 - **M5, v1.0:** export, published multi-arch image (amd64 + arm64, GitHub Container Registry), CI (including the M3 Docker smoke test), docs.
 
-## 7. Questions
+## 7. Questions (all answered)
 
 | # | Question | Answer |
 |---|---|---|
@@ -228,9 +243,9 @@ Design points that shape the steps:
 | Q4 | Test repository for the git spike | No longer needed (D16). |
 | Q5 | Repository workflow | Commit straight to `main`, one commit per step. CI waits for the GitHub repository. |
 | Q6 | Clone a repo, or open a local folder? | Open a local folder, served by the back-end; git in the user's own tools (D16). |
-| Q7 | **Open:** which Docker runtime on the Mac? | Proposal: **Docker Desktop**. It's the reference, so the README instructions match what most users run. Note: Docker Desktop needs a paid subscription for companies above 250 employees or $10M revenue; OrbStack or colima are drop-in alternatives (the same `docker compose` commands). |
-| Q8 | **Open:** is a Linux machine or VM available for testing? | Proposal: test on macOS in M3; Linux (where file ownership matters most) gets covered by CI in M5, which runs `scripts/docker-smoke.sh` on Ubuntu. |
-| Q9 | **Open:** build the image locally only, or also publish it? | Proposal: local builds in M3 (`docker compose up --build`); publishing to GitHub Container Registry waits for M5, together with CI and multi-arch builds. |
+| Q7 | Which Docker runtime on the Mac? | None for now: Docker is prepared for Linux and tested there (Q8). macOS Docker (Docker Desktop, OrbStack, colima) can be checked later with the same scripts. |
+| Q8 | Is a Linux machine available for testing? | Yes, a separate machine; the user runs the M3 checks there later. M3 is written but not tested here; CI in M5 runs `scripts/docker-smoke.sh` on Ubuntu too. |
+| Q9 | Build the image locally only, or also publish it? | Local builds in M3 (`docker compose up --build`); publishing waits for M5, together with CI and multi-arch builds. |
 
 ## 8. Decision log
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-LoomViz is a web editor for [WireViz](https://github.com/wireviz/WireViz) wiring harness diagrams. It opens a local folder (usually a git repository) and edits the harness YAML in its `loom/` subfolder, with a live diagram; git stays in the user's own tools. M0–M2 are done (prototype with Monaco, two-way diagram/YAML selection, file tree, live reload, git status); Docker (M3) is next.
+LoomViz is a web editor for [WireViz](https://github.com/wireviz/WireViz) wiring harness diagrams. It opens a local folder (usually a git repository) and edits the harness YAML in its `loom/` subfolder, with a live diagram; git stays in the user's own tools. M0–M2 are done (prototype with Monaco, two-way diagram/YAML selection, file tree, live reload, git status); Docker (M3) is written (Dockerfile, compose.yaml, scripts) but not yet run on a real Docker host; the user tests it on Linux.
 
 - [SPEC.md](SPEC.md): **what** LoomViz does. Requirements FR-1 to FR-34, tagged by release; removed ones are kept as stubs so numbers stay stable.
 - [PLAN.md](PLAN.md): **how**, **in what order** and **why**: milestone table, M2 step by step (build, verify, commit), and the decision log (D1–D17; D16 is the switch to local folders).
@@ -18,7 +18,8 @@ Work one PLAN step at a time: build, run its Verify check, then make the one com
 - Back-end (`backend/`, uv, Python 3.12): `uv run loomviz ../examples`; `uv run pytest` (single test: `uv run pytest tests/test_render.py::test_renders_demo`); `uv run ruff check . && uv run ruff format --check .`; `uv run mypy loomviz`. `tests/test_server.py` runs a real uvicorn server (the test client bypasses uvicorn, so it can't catch missing WebSocket support).
 - Front-end (`frontend/`, pnpm): `pnpm dev` (Vite on :5173, proxies `/api` and `/ws` to a back-end on :8000; open `http://localhost:5173/?token=<token the back-end printed>`); `pnpm test` (Vitest; single file: `pnpm vitest run tests/token.test.ts`); `pnpm lint` (ESLint + Prettier check); `pnpm build`. TypeScript is pinned to 6.x because typescript-eslint doesn't support TS 7 yet.
 - Spike (`spike/`): `uv run pytest`, `uv run python bench.py`; `spike/roundtrip-ts`: `pnpm test`.
-- Not built yet: Docker (M3).
+- Docker (Linux): `scripts/docker.sh [folder] [--port N] [--poll] [--selinux] [--detach]`; end-to-end check `scripts/docker-smoke.sh` (`--native` runs the same checks against a local server, for working on the script without Docker). Lint the scripts with shellcheck and the Dockerfile with hadolint when changing them.
+- In Docker the server listens on `0.0.0.0:8000` and `LOOMVIZ_PUBLIC_PORT` (the host port) drives the Host/Origin checks and the launch URL (D18); the image sets `LOOMVIZ_FRONTEND_DIST` and `LOOMVIZ_ALLOW_REMOTE=1`; `LOOMVIZ_POLL=1` switches file watching to polling.
 
 ## Architecture in brief
 
