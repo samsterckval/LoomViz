@@ -2,8 +2,10 @@
 # End-to-end check of LoomViz in Docker (PLAN M3.5). Builds the image, starts it on a temporary
 # git repository copied from examples/, and prints PASS/FAIL per check. Cleans up afterwards.
 #
-#   scripts/docker-smoke.sh [--poll] [--selinux] [--keep] [--native]
+#   scripts/docker-smoke.sh [--lan] [--tls] [--poll] [--selinux] [--keep] [--native]
 #
+#   --lan       LAN mode (FR-35): also checks access via this machine's LAN address
+#   --tls       HTTPS with a throwaway self-signed certificate (needs openssl)
 #   --poll      start with LOOMVIZ_POLL=1 (if the live-reload check fails without it)
 #   --selinux   add compose.selinux.yaml (Fedora, RHEL)
 #   --keep      leave the container and temp folder running for a look (prints how to stop)
@@ -19,6 +21,8 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 poll=0
 keep=0
 native=0
+lan=0
+tls=0
 compose_files=(-f "$repo/compose.yaml")
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -26,12 +30,15 @@ while [ $# -gt 0 ]; do
     --selinux) compose_files+=(-f "$repo/compose.selinux.yaml") ;;
     --keep) keep=1 ;;
     --native) native=1 ;;
-    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --lan) lan=1 ;;
+    --tls) tls=1 ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
   shift
 done
 
+[ "$tls" = 1 ] && ! command -v openssl >/dev/null && { echo "--tls needs openssl" >&2; exit 2; }
 for tool in curl git python3; do
   command -v "$tool" >/dev/null || { echo "Missing $tool" >&2; exit 2; }
 done
@@ -68,6 +75,31 @@ if [ "$native" = 0 ] && docker info --format '{{json .SecurityOptions}}' 2>/dev/
   gid=0
 fi
 export WORKSPACE="$workspace" PORT="$port" LOOMVIZ_UID="$uid" LOOMVIZ_GID="$gid" LOOMVIZ_TOKEN="$token" LOOMVIZ_POLL="$poll"
+
+scheme=http
+native_args=()
+curl_tls=()
+secrets_dir="$(mktemp -d "${tmp_root%/}/loomviz-smoke-tls.XXXXXX")"
+if [ "$tls" = 1 ]; then
+  scheme=https
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=loomviz-smoke" \
+    -keyout "$secrets_dir/key.pem" -out "$secrets_dir/cert.pem" >/dev/null 2>&1
+  export TLS_CERT="$secrets_dir/cert.pem" TLS_KEY="$secrets_dir/key.pem"
+  compose_files+=(-f "$repo/compose.tls.yaml")
+  native_args+=(--tls-cert "$TLS_CERT" --tls-key "$TLS_KEY")
+  curl_tls=(-k)  # self-signed
+fi
+lan_ip=""
+if [ "$lan" = 1 ]; then
+  LOOMVIZ_ALLOWED_HOSTS="$("$repo/scripts/lan-hosts.sh")"
+  export BIND_ADDRESS=0.0.0.0 LOOMVIZ_ALLOWED_HOSTS
+  native_args+=(--lan)
+  lan_ip="$(printf '%s' "$LOOMVIZ_ALLOWED_HOSTS" | tr ',' '\n' | grep -E '^[0-9]+(\.[0-9]+){3}$' | head -1)"
+else
+  export BIND_ADDRESS=127.0.0.1 LOOMVIZ_ALLOWED_HOSTS=""
+fi
+# Every curl below talks to LoomViz; accept the self-signed certificate in --tls mode.
+curl() { command curl ${curl_tls[@]+"${curl_tls[@]}"} "$@"; }
 compose=(docker compose "${compose_files[@]}" --project-directory "$repo" -p loomviz-smoke)
 
 native_pid=""
@@ -87,13 +119,13 @@ cleanup() {
   else
     "${compose[@]}" down --timeout 5 >/dev/null 2>&1
   fi
-  rm -rf "$workspace"
+  rm -rf "$workspace" "$secrets_dir"
 }
 trap cleanup EXIT
 
 if [ "$native" = 1 ]; then
   echo "Starting natively (workspace $workspace, port $port)…"
-  (cd "$repo/backend" && exec uv run loomviz "$workspace" --port "$port") >/dev/null 2>&1 &
+  (cd "$repo/backend" && exec uv run loomviz "$workspace" --port "$port" ${native_args[@]+"${native_args[@]}"}) >/dev/null 2>&1 &
   native_pid=$!
 else
   echo "Building and starting (workspace $workspace, port $port, user $uid:$gid, poll=$poll)…"
@@ -109,7 +141,7 @@ else
     "${compose[@]}" up --detach >/dev/null 2>&1 || true
   fi
 fi
-base="http://127.0.0.1:$port"
+base="$scheme://127.0.0.1:$port"
 for _ in $(seq 1 60); do
   curl -fs -o /dev/null "$base/" && break
   sleep 1
@@ -128,8 +160,9 @@ in_container() {
 }
 container_id() { "${compose[@]}" ps -q loomviz; }
 is_healthy() { [ "$(docker inspect -f '{{.State.Health.Status}}' "$(container_id)")" = healthy ]; }
-published_on_loopback() { [ "$("${compose[@]}" port loomviz 8000)" = "127.0.0.1:$port" ]; }
-logs_show_url() { "${compose[@]}" logs loomviz | grep -qF "Open: http://127.0.0.1:$port/?token="; }
+published_on() { [ "$("${compose[@]}" port loomviz 8000)" = "$1:$port" ]; }
+logs_show_url() { "${compose[@]}" logs loomviz | grep -qF "Open: $scheme://127.0.0.1:$port/?token="; }
+logs_show_lan_url() { "${compose[@]}" logs loomviz | grep -qF "or: $scheme://$lan_ip:$port/?token="; }
 runs_as_uid() { [ "$(in_container id -u | tr -d '\r')" = "$uid" ]; }
 root_read_only() { ! in_container sh -c 'touch /probe' 2>/dev/null; }
 has_tools() { in_container sh -c 'dot -V && git --version'; }
@@ -140,8 +173,13 @@ if [ "$native" = 1 ]; then
   skip "container checks" "--native"
 else
   check "container is healthy" is_healthy
-  check "port published on 127.0.0.1 only" published_on_loopback
+  if [ "$lan" = 1 ]; then
+    check "port published on all interfaces (LAN mode)" published_on 0.0.0.0
+  else
+    check "port published on 127.0.0.1 only" published_on 127.0.0.1
+  fi
   check "launch URL in the logs uses the host port" logs_show_url
+  [ -n "$lan_ip" ] && check "logs also show the LAN URL" logs_show_lan_url
   check "runs as $uid:$gid" runs_as_uid
   check "root filesystem is read-only" root_read_only
   check "Graphviz and git in the image" has_tools
@@ -157,6 +195,23 @@ foreign="$(status_of "${auth[@]}" -H "Host: 192.168.1.10:$port" "$base/api/sessi
 [ "$foreign" = 403 ] && pass "foreign Host header: 403" || fail "foreign Host header: 403" "got $foreign"
 origin="$(status_of "${auth[@]}" -H "Origin: https://evil.example" "$base/api/session")"
 [ "$origin" = 403 ] && pass "foreign Origin: 403" || fail "foreign Origin: 403" "got $origin"
+
+# --- LAN access (FR-35) --------------------------------------------------------------------------
+
+if [ "$lan" = 1 ]; then
+  if [ -z "$lan_ip" ]; then
+    skip "LAN access checks" "no IPv4 LAN address found"
+  else
+    via_lan="$(status_of "${auth[@]}" "$scheme://$lan_ip:$port/api/session")"
+    [ "$via_lan" = 200 ] && pass "reachable via the LAN address $lan_ip" || fail "reachable via the LAN address $lan_ip" "got $via_lan"
+    made_up="$(status_of "${auth[@]}" -H "Host: not-this-box.example:$port" "$scheme://$lan_ip:$port/api/session")"
+    [ "$made_up" = 403 ] && pass "LAN: a made-up Host header still gets 403" || fail "LAN: a made-up Host header still gets 403" "got $made_up"
+  fi
+fi
+if [ "$tls" = 1 ]; then
+  plain="$(command curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/api/session")"
+  [ "$plain" != 200 ] && pass "TLS: plain HTTP isn't served" || fail "TLS: plain HTTP isn't served" "got $plain"
+fi
 
 # --- workspace, git, rendering -------------------------------------------------------------------
 
@@ -193,12 +248,19 @@ api "$base/api/git/status" | grep -q '"path":"smoke.yml","status":"untracked"' &
 # the internal port 8000 but performs the handshake for 127.0.0.1:$PORT, as a browser would.
 
 events="$(mktemp)"
-in_container python - "$port" "$token" "$( [ "$native" = 1 ] && echo "$port" || echo 8000 )" >"$events" 2>&1 <<'PY' &
-import json, socket, sys
+in_container python - "$port" "$token" "$( [ "$native" = 1 ] && echo "$port" || echo 8000 )" "$scheme" >"$events" 2>&1 <<'PY' &
+import json, socket, ssl, sys
 from websockets.sync.client import connect
-port, token, internal_port = sys.argv[1], sys.argv[2], int(sys.argv[3])
+port, token, internal_port, scheme = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 sock = socket.create_connection(("127.0.0.1", internal_port), timeout=5)
-with connect(f"ws://127.0.0.1:{port}/ws/events?token={token}", sock=sock, open_timeout=5) as ws:
+tls = None
+if scheme == "https":
+    tls = ssl.create_default_context()
+    tls.check_hostname = False
+    tls.verify_mode = ssl.CERT_NONE  # the smoke test's throwaway self-signed certificate
+ws_scheme = "wss" if scheme == "https" else "ws"
+with connect(f"{ws_scheme}://127.0.0.1:{port}/ws/events?token={token}", sock=sock, ssl=tls,
+             server_hostname="127.0.0.1" if tls else None, open_timeout=5) as ws:
     print("ready", flush=True)
     try:
         while True:
@@ -233,7 +295,9 @@ for c in "${CHROME:-}" /usr/bin/google-chrome /usr/bin/chromium /usr/bin/chromiu
 done
 if command -v node >/dev/null && [ -n "$chrome" ]; then
   git -C "$workspace" checkout -q -- loom/demo02.yml  # back to the original for the UI checks
-  if CHROME="$chrome" node "$repo/scripts/ui-smoke.mjs" "$base/?token=$token" | sed 's/^/      /'; then
+  ui_base="$base"
+  [ -n "$lan_ip" ] && ui_base="$scheme://$lan_ip:$port"  # in LAN mode, test the UI through the LAN address
+  if CHROME="$chrome" LOOMVIZ_SMOKE_INSECURE="$tls" node "$repo/scripts/ui-smoke.mjs" "$ui_base/?token=$token" | sed 's/^/      /'; then
     pass "UI smoke test (scripts/ui-smoke.mjs)"
   else
     fail "UI smoke test (scripts/ui-smoke.mjs)"

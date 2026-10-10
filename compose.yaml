@@ -20,12 +20,14 @@ services:
         bind:
           create_host_path: false
     ports:
-      # Reachable from this machine only.
-      - "127.0.0.1:${PORT:-8000}:8000"
+      # 127.0.0.1: this machine only (default). 0.0.0.0: LAN access, together with
+      # LOOMVIZ_ALLOWED_HOSTS (scripts/docker.sh --lan sets both).
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8000}:8000"
     environment:
       LOOMVIZ_PUBLIC_PORT: "${PORT:-8000}"  # the port the browser uses (Host/Origin checks, D18)
       LOOMVIZ_TOKEN: "${LOOMVIZ_TOKEN:-}"  # empty: a new random launch token each start
       LOOMVIZ_POLL: "${LOOMVIZ_POLL:-0}"  # 1: poll for file changes if events don't arrive
+      LOOMVIZ_ALLOWED_HOSTS: "${LOOMVIZ_ALLOWED_HOSTS:-}"  # LAN host names/IPs (FR-35)
     read_only: true
     tmpfs:
       - /tmp:size=256m,mode=1777

@@ -1,0 +1,22 @@
+# HTTPS (SPEC FR-35): mounts a certificate and key read-only and serves TLS with them.
+#   TLS_CERT=/path/cert.pem TLS_KEY=/path/key.pem docker compose -f compose.yaml -f compose.tls.yaml up --build
+#   (or scripts/docker.sh --tls /path/cert.pem /path/key.pem)
+# The key must be readable by the user the container runs as (LOOMVIZ_UID).
+services:
+  loomviz:
+    environment:
+      LOOMVIZ_TLS_CERT: /run/loomviz-tls/cert.pem
+      LOOMVIZ_TLS_KEY: /run/loomviz-tls/key.pem
+    volumes:
+      - type: bind
+        source: "${TLS_CERT:?set TLS_CERT to the certificate file}"
+        target: /run/loomviz-tls/cert.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${TLS_KEY:?set TLS_KEY to the private key file}"
+        target: /run/loomviz-tls/key.pem
+        read_only: true
+        bind:
+          create_host_path: false

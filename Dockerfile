@@ -26,7 +26,8 @@ RUN apt-get update \
 
 # The mounted folder may be owned by a different uid than the container user; git would refuse
 # to read it ("dubious ownership"). LoomViz only ever reads git (PLAN D16, D18).
-RUN git config --system --add safe.directory /workspace
+RUN git config --system --add safe.directory /workspace \
+    && mkdir -p /run/loomviz-tls
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /usr/local/bin/uv
 
@@ -56,7 +57,8 @@ USER 10001:10001
 WORKDIR /workspace
 EXPOSE 8000
 
-# A TCP check: no extra endpoint, and every real endpoint needs the launch token.
+# A TCP check (works with and without TLS): no extra endpoint, and every real endpoint needs
+# the launch token.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 2).close()"]
 

@@ -41,6 +41,8 @@ const chrome = spawn(chromePath, [
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${profile}`,
   "--window-size=1500,950",
+  // docker-smoke.sh --tls uses a throwaway self-signed certificate.
+  ...(process.env.LOOMVIZ_SMOKE_INSECURE === "1" ? ["--ignore-certificate-errors"] : []),
   "about:blank",
 ], { stdio: "ignore" });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
