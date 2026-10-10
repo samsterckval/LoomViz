@@ -1,0 +1,15 @@
+# Only backend/ and frontend/ sources are needed to build the image.
+.git
+.env
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+frontend/dist
+spike
+examples
+scripts
+*.md
+!backend/README.md
