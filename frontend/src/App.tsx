@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, createClient, type Client, type FileList, type Session } from "./api/client";
 import { takeLaunchToken } from "./api/token";
 import { createRenderScheduler, initialPreview, type PreviewState } from "./preview/renderScheduler";
-import { Preview } from "./preview/Preview";
+import { Preview, type PreviewView } from "./preview/Preview";
 
 interface OpenFile {
   path: string;
@@ -36,6 +36,7 @@ function Editor({ client }: { client: Client }) {
   const [preview, setPreview] = useState<PreviewState>(initialPreview);
   const [status, setStatus] = useState<Status>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [view, setView] = useState<PreviewView>("diagram");
 
   const scheduler = useMemo(
     () => createRenderScheduler({ render: client.render, onUpdate: setPreview }),
@@ -166,7 +167,15 @@ function Editor({ client }: { client: Client }) {
               scheduler.schedule(e.target.value, open?.path ?? null);
             }}
           />
-          <Preview state={preview} />
+          <Preview
+            state={preview}
+            view={view}
+            onViewChange={(next) => {
+              setView(next);
+              scheduler.setWantHtml(next === "document"); // fetch the HTML only while it's on screen
+              if (next === "document" && open) void scheduler.now(text, open.path);
+            }}
+          />
         </div>
       )}
     </div>

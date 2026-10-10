@@ -24,6 +24,7 @@ class RenameBody(BaseModel):
 class RenderBody(BaseModel):
     yaml: str
     path: str | None = None
+    html: bool = False
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -114,7 +115,7 @@ def create_app(settings: Settings) -> FastAPI:
         file_path: Path | None = None
         if body.path:
             file_path = open_workspace().resolve(body.path)
-        return await r.render(body.yaml, file_path)
+        return await r.render(body.yaml, file_path, html=body.html)
 
     # -- front-end (built files; no token needed, they contain no data) -------------------------
 

@@ -1,7 +1,7 @@
 // Typed client for the LoomViz back-end (SPEC §11). Every call carries the launch token.
 
 export type RenderResult =
-  { svg: string; warnings: string[] } | { error: string; line: number | null; kind: string };
+  { svg: string; html?: string; warnings: string[] } | { error: string; line: number | null; kind: string };
 
 export interface FileList {
   loom_folder: string;
@@ -62,11 +62,17 @@ export function createClient(token: string, fetchFn: typeof fetch = fetch.bind(g
       const response = await call(`/api/files/${filePath(path)}`, { method: "PUT", headers, body: text });
       return response.headers.get("ETag") ?? "";
     },
-    async render(yaml: string, path: string | null, signal?: AbortSignal): Promise<RenderResult> {
+    /** `html: true` also returns WireViz's HTML document (diagram, BOM, drawing template). */
+    async render(
+      yaml: string,
+      path: string | null,
+      signal?: AbortSignal,
+      html = false,
+    ): Promise<RenderResult> {
       const response = await call("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ yaml, path }),
+        body: JSON.stringify({ yaml, path, html }),
         signal,
       });
       return response.json();

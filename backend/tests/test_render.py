@@ -143,3 +143,56 @@ def test_timeout_kills_worker_and_service_recovers(workspace, monkeypatch):
         assert "svg" in asyncio.run(renderer.render(CONNECTED))
     finally:
         renderer.close()
+
+
+# --- document view (FR-30) --------------------------------------------------------------------
+
+
+def render_html(client, yaml_text: str, path: str | None = "demo02.yml") -> dict:
+    response = client.post("/api/render", json={"yaml": yaml_text, "path": path, "html": True})
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_html_document_has_frame_bom_and_diagram(client):
+    result = render_html(client, DEMO.read_text())
+    html = result["html"]
+    assert "WireViz Demo 2" in html  # title block from metadata
+    assert 'id="frame" class="A3"' in html  # din-6771 drawing frame, A3 sheet
+    assert '<table class="bom">' in html
+    assert "<svg" in html
+    assert "loomviz-html-" not in html and "/tmp" not in html and "/var/folders" not in html
+    assert result["warnings"] == []
+
+
+def test_html_only_when_asked(client):
+    assert "html" not in render(client, DEMO.read_text(), path="demo02.yml")
+
+
+@pytest.mark.parametrize("name", ["../../../../etc/passwd", "/etc/hosts", "no-such-template", "a b"])
+def test_unsafe_or_unknown_template_falls_back_to_simple(client, name):
+    text = DEMO.read_text().replace("name: din-6771", f"name: {name!r}")
+    result = render_html(client, text)
+    assert "html" in result
+    assert "root:" not in result["html"]
+    assert any("Unknown document template" in w for w in result["warnings"])
+
+
+def test_custom_template_inside_loom(client, workspace):
+    (workspace / "loom" / "company.html").write_text(
+        "<html><body>ACME FRAME <!-- %title% --> <!-- %diagram% --></body></html>"
+    )
+    text = DEMO.read_text().replace("name: din-6771", "name: company")
+    html = render_html(client, text)["html"]
+    assert "ACME FRAME" in html and "WireViz Demo 2" in html and "<svg" in html
+
+
+def test_cache_separates_html_requests(workspace):
+    renderer = Renderer(workspace / "loom", workers=1)
+    try:
+        svg_only = asyncio.run(renderer.render(CONNECTED))
+        with_html = asyncio.run(renderer.render(CONNECTED, html=True))
+        assert "html" not in svg_only and "html" in with_html
+        assert renderer.jobs_run == 2
+    finally:
+        renderer.close()

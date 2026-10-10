@@ -8,14 +8,26 @@ import type { RenderResult } from "../api/client";
 
 export interface PreviewState {
   svg: string | null; // last good diagram
+  html: string | null; // last good WireViz document, when it was requested
   warnings: string[];
   error: { message: string; line: number | null } | null;
   rendering: boolean;
 }
 
-export const initialPreview: PreviewState = { svg: null, warnings: [], error: null, rendering: false };
+export const initialPreview: PreviewState = {
+  svg: null,
+  html: null,
+  warnings: [],
+  error: null,
+  rendering: false,
+};
 
-type RenderFn = (yaml: string, path: string | null, signal: AbortSignal) => Promise<RenderResult>;
+type RenderFn = (
+  yaml: string,
+  path: string | null,
+  signal: AbortSignal,
+  html: boolean,
+) => Promise<RenderResult>;
 
 export function createRenderScheduler(options: {
   render: RenderFn;
@@ -27,6 +39,7 @@ export function createRenderScheduler(options: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let latestId = 0;
   let controller: AbortController | undefined;
+  let wantHtml = false;
 
   const update = (patch: Partial<PreviewState>) => {
     state = { ...state, ...patch };
@@ -39,10 +52,16 @@ export function createRenderScheduler(options: {
     controller = new AbortController();
     update({ rendering: true });
     try {
-      const result = await options.render(yaml, path, controller.signal);
+      const result = await options.render(yaml, path, controller.signal, wantHtml);
       if (id !== latestId) return; // a newer render has started
       if ("svg" in result)
-        update({ svg: result.svg, warnings: result.warnings, error: null, rendering: false });
+        update({
+          svg: result.svg,
+          html: result.html ?? null,
+          warnings: result.warnings,
+          error: null,
+          rendering: false,
+        });
       else update({ error: { message: result.error, line: result.line }, rendering: false });
     } catch (err) {
       if (id !== latestId || (err instanceof DOMException && err.name === "AbortError")) return;
@@ -51,6 +70,10 @@ export function createRenderScheduler(options: {
   }
 
   return {
+    /** Whether renders should also fetch the HTML document (only while it's on screen). */
+    setWantHtml(value: boolean): void {
+      wantHtml = value;
+    },
     /** Call on every edit. */
     schedule(yaml: string, path: string | null): void {
       clearTimeout(timer);

@@ -89,6 +89,21 @@ describe("render scheduler", () => {
     expect(states[states.length - 1].error?.message).toContain("Failed to fetch");
   });
 
+  it("asks for the HTML document only when wanted", async () => {
+    const flags: boolean[] = [];
+    const scheduler = createRenderScheduler({
+      render: async (_y, _p, _s, html) => {
+        flags.push(html);
+        return { svg: "<svg/>", html: html ? "<html></html>" : undefined, warnings: [] };
+      },
+      onUpdate: () => {},
+    });
+    await scheduler.now("a", null);
+    scheduler.setWantHtml(true);
+    await scheduler.now("a", null);
+    expect(flags).toEqual([false, true]);
+  });
+
   it("reset forgets the diagram and ignores in-flight results", async () => {
     const { calls, scheduler, latest } = setup();
     void scheduler.now("a", null);

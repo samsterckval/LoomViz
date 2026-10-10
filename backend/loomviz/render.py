@@ -1,10 +1,15 @@
-"""Render service: WireViz YAML -> SVG in worker processes (SPEC FR-11 to FR-14, PLAN D14).
+"""Render service: WireViz YAML -> SVG (and HTML document) in worker processes.
+
+SPEC FR-11 to FR-14 and FR-30; PLAN D14.
 
 - wireviz runs in a process pool, so a hung Graphviz call can be killed (timeout) without
   affecting the server; the pool is replaced afterwards.
 - Results are cached by content: YAML text, file path, wireviz version and referenced images.
 - Images referenced by relative path resolve against the edited file's folder and must stay
   inside loom/; wireviz then inlines them into the SVG as data URIs.
+- The HTML document (WireViz's own page: diagram, BOM, optional drawing template) is built
+  from the same harness, so Graphviz runs once. Template names are restricted to plain names
+  found inside loom/ or among WireViz's built-ins; WireViz would otherwise resolve them as paths.
 - Errors never raise to the client: the response is {"error", "line"} instead of {"svg"}.
 """
 
@@ -18,6 +23,8 @@ import json
 import multiprocessing
 import os
 import re
+import shutil
+import tempfile
 import time
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor
@@ -69,8 +76,59 @@ def _group_warnings(printed: str) -> list[str]:
     return warnings
 
 
-def render_job(yaml_text: str, base_dir: str, loom: str) -> dict[str, Any]:
-    """Render in a worker. Returns {"svg", "warnings"} or {"error", "line", "kind"}."""
+_TEMPLATE_NAME = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _builtin_templates() -> set[str]:
+    import wireviz
+
+    return {p.stem for p in (Path(wireviz.__file__).parent / "templates").glob("*.html")}
+
+
+def check_template(data: dict[str, Any], base_dir: Path, loom: Path, warnings: list[str]) -> Path | None:
+    """Validate metadata.template.name. Returns a custom template file inside loom/ to use, if any.
+
+    Unsafe or unknown names are removed (WireViz then uses its simple template) with a warning.
+    """
+    metadata = data.get("metadata")
+    template = metadata.get("template") if isinstance(metadata, dict) else None
+    name = template.get("name") if isinstance(template, dict) else None
+    if name is None:
+        return None
+    if isinstance(name, str) and _TEMPLATE_NAME.fullmatch(name):
+        custom = (base_dir / f"{name}.html").resolve()
+        if custom.is_relative_to(loom.resolve()) and custom.is_file():
+            return custom
+        if name in _builtin_templates():
+            return None
+    warnings.append(f"Unknown document template {name!r}; using the simple template")
+    assert isinstance(template, dict)
+    del template["name"]
+    return None
+
+
+def _html_document(harness: Any, stem: str, custom_template: Path | None) -> str:
+    """WireViz's HTML output for an already-built harness (reuses its SVG; no second Graphviz run)."""
+    from wireviz.wv_bom import bom_list
+    from wireviz.wv_html import generate_html_output
+
+    tmp = Path(tempfile.mkdtemp(prefix="loomviz-html-"))
+    try:
+        base = tmp / stem
+        Path(f"{base}.tmp.svg").write_text(harness.svg, encoding="utf-8")
+        if custom_template:
+            shutil.copy(custom_template, tmp / custom_template.name)  # found first, next to "the file"
+        generate_html_output(base, bom_list(harness.bom()), harness.metadata, harness.options)
+        html = Path(f"{base}.html").read_text(encoding="utf-8")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return html.replace(f"{tmp}/", "").replace(str(tmp), "")
+
+
+def render_job(
+    yaml_text: str, base_dir: str, loom: str, want_html: bool = False, stem: str = "harness"
+) -> dict[str, Any]:
+    """Render in a worker. Returns {"svg", "html"?, "warnings"} or {"error", "line", "kind"}."""
     if os.environ.get("LOOMVIZ_TEST_HOOKS") == "1" and "# test:sleep" in yaml_text:
         time.sleep(60)
     from wireviz import wireviz
@@ -102,14 +160,20 @@ def render_job(yaml_text: str, base_dir: str, loom: str) -> dict[str, Any]:
             if isinstance(attribs, dict) and attribs.get("image") == {}:
                 del attribs["image"]
 
+    custom_template = check_template(data, Path(base_dir), Path(loom), warnings)
+
     captured = io.StringIO()
     try:
         with contextlib.redirect_stdout(captured):
             # A fresh image_paths list every time: wireviz.parse() mutates its default (spike §1).
-            svg = wireviz.parse(data, return_types="svg", image_paths=[Path(base_dir)])
+            harness = wireviz.parse(data, return_types="harness", image_paths=[Path(base_dir)])
+            result: dict[str, Any] = {"svg": harness.svg}
+            if want_html:
+                result["html"] = _html_document(harness, stem, custom_template)
     except Exception as exc:  # wireviz raises bare Exception / TypeError for harness errors
         return {"error": str(exc) or type(exc).__name__, "line": None, "kind": "harness"}
-    return {"svg": svg, "warnings": warnings + _group_warnings(captured.getvalue())}
+    result["warnings"] = warnings + _group_warnings(captured.getvalue())
+    return result
 
 
 # --- line lookup for harness errors (main process) --------------------------------------------
@@ -190,7 +254,7 @@ class Renderer:
     def base_dir(self, path: Path | None) -> Path:
         return path.parent if path else self.loom
 
-    def cache_key(self, yaml_text: str, path: Path | None) -> str:
+    def cache_key(self, yaml_text: str, path: Path | None, html: bool = False) -> str:
         base = self.base_dir(path)
         images: list[Any] = []
         if "image" in yaml_text:
@@ -202,17 +266,24 @@ class Renderer:
                 resolved = resolve_image(src, base, self.loom)
                 stat = resolved.stat() if resolved else None
                 images.append([src, stat.st_size if stat else None, stat.st_mtime_ns if stat else None])
-        material = json.dumps([yaml_text, str(path) if path else None, WIREVIZ_VERSION, images])
+        if path and "template" in yaml_text:  # a custom template file next to the harness may change
+            for candidate in sorted(base.glob("*.html")):
+                stat = candidate.stat()
+                images.append([candidate.name, stat.st_size, stat.st_mtime_ns])
+        material = json.dumps([yaml_text, str(path) if path else None, WIREVIZ_VERSION, images, html])
         return hashlib.sha256(material.encode()).hexdigest()
 
-    async def render(self, yaml_text: str, path: Path | None = None) -> dict[str, Any]:
-        key = self.cache_key(yaml_text, path)
+    async def render(self, yaml_text: str, path: Path | None = None, html: bool = False) -> dict[str, Any]:
+        key = self.cache_key(yaml_text, path, html)
         if key in self.cache:
             self.cache.move_to_end(key)
             return self.cache[key]
 
         self.jobs_run += 1
-        future = self._pool.submit(render_job, yaml_text, str(self.base_dir(path)), str(self.loom))
+        stem = path.stem if path else "harness"
+        future = self._pool.submit(
+            render_job, yaml_text, str(self.base_dir(path)), str(self.loom), html, stem
+        )
         try:
             result = await asyncio.wait_for(asyncio.wrap_future(future), timeout=self.timeout_s)
         except TimeoutError:
