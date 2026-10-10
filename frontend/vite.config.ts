@@ -8,6 +8,8 @@ const backend = "http://127.0.0.1:8000";
 
 export default defineConfig({
   plugins: [react()],
+  // Monaco is large (the editor core alone is a few MB); it is bundled on purpose for offline use.
+  build: { chunkSizeWarningLimit: 4096 },
   server: {
     port: 5173,
     strictPort: true,

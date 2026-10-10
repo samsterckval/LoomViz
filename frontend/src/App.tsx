@@ -10,6 +10,7 @@ import {
 import { takeLaunchToken } from "./api/token";
 import { GitBadge } from "./GitBadge";
 import { locateComponent } from "./editor/locate";
+import { YamlEditor, type EditorMarker, type YamlEditorHandle } from "./editor/YamlEditor";
 import { createRenderScheduler, initialPreview, type PreviewState } from "./preview/renderScheduler";
 import { Preview, type PreviewView } from "./preview/Preview";
 import { SelectionPanel } from "./preview/SelectionPanel";
@@ -50,7 +51,7 @@ function Editor({ client }: { client: Client }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [view, setView] = useState<PreviewView>("diagram");
   const [selection, setSelection] = useState<Selection | null>(null);
-  const editor = useRef<HTMLTextAreaElement>(null);
+  const editor = useRef<YamlEditorHandle>(null);
 
   const scheduler = useMemo(
     () => createRenderScheduler({ render: client.render, onUpdate: setPreview }),
@@ -63,6 +64,7 @@ function Editor({ client }: { client: Client }) {
   const openFile = useCallback(
     async (path: string) => {
       const { text: content, etag } = await client.readFile(path);
+      editor.current?.replaceText(path, content); // if the file's model already exists (reload)
       setOpen({ path, savedText: content, etag });
       setText(content);
       setStatus(null);
@@ -125,21 +127,23 @@ function Editor({ client }: { client: Client }) {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty]);
 
-  // Select a line in the editor and scroll it into view (Monaco will do this properly in M2).
-  const revealLine = useCallback(
-    (line: number) => {
-      const area = editor.current;
-      if (!area) return;
-      const lines = text.split("\n");
-      const start = lines.slice(0, line - 1).reduce((n, l) => n + l.length + 1, 0);
-      const end = start + (lines[line - 1]?.length ?? 0);
-      area.focus({ preventScroll: true });
-      area.setSelectionRange(start, end);
-      const lineHeight = parseFloat(getComputedStyle(area).lineHeight) || 19.5;
-      area.scrollTop = Math.max(0, (line - 1) * lineHeight - area.clientHeight / 3);
-    },
-    [text],
+  const revealLine = useCallback((line: number) => editor.current?.revealLine(line), []);
+
+  // Render errors as editor markers (FR-10, FR-13).
+  const markers = useMemo<EditorMarker[]>(
+    () => (preview.error?.line ? [{ line: preview.error.line, message: preview.error.message }] : []),
+    [preview.error],
   );
+
+  // Lines of the selected component: its definition and every connection-set entry using it.
+  const highlightLines = useMemo(() => {
+    if (!selection) return [];
+    const designator =
+      selection.kind === "component" ? selection.designator : preview.wires[selection.key]?.cable;
+    if (!designator) return [];
+    const found = locateComponent(text, designator);
+    return [found.definition, ...found.usages].flatMap((loc) => (loc ? [loc.line] : []));
+  }, [selection, preview.wires, text]);
 
   const select = useCallback(
     (next: Selection | null) => {
@@ -219,18 +223,19 @@ function Editor({ client }: { client: Client }) {
         </main>
       ) : (
         <div className="panes">
-          <textarea
-            ref={editor}
-            className="editor"
-            value={text}
-            spellCheck={false}
-            wrap="off"
-            aria-label="YAML editor"
-            onChange={(e) => {
-              setText(e.target.value);
-              scheduler.schedule(e.target.value, open?.path ?? null);
-            }}
-          />
+          {open && (
+            <YamlEditor
+              ref={editor}
+              path={open.path}
+              initialText={text}
+              markers={markers}
+              highlightLines={highlightLines}
+              onChange={(next) => {
+                setText(next);
+                scheduler.schedule(next, open.path);
+              }}
+            />
+          )}
           <Preview
             state={preview}
             selection={selection}
