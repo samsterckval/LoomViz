@@ -7,6 +7,7 @@ import {
   type GitStatus,
   type Session,
 } from "./api/client";
+import { planReload } from "./api/events";
 import { takeLaunchToken } from "./api/token";
 import { GitBadge } from "./GitBadge";
 import { locateAt, locateComponent } from "./editor/locate";
@@ -155,6 +156,25 @@ function Workbench({ client }: { client: Client }) {
         ),
       );
   }, [client, loadFile, openFile, refreshGit, storage]);
+
+  // Live updates (FR-9, FR-34): reload files changed on disk, refresh the tree and git status.
+  const [live, setLive] = useState(true);
+  const latest = useRef({ buffers, active });
+  useEffect(() => {
+    latest.current = { buffers, active };
+  });
+  useEffect(() => {
+    if (!session) return;
+    return client.connectEvents((event) => {
+      const { buffers: open, active: current } = latest.current;
+      const plan = planReload(event, new Set(Object.keys(open)), current);
+      for (const path of plan.reload) void loadFile(path);
+      for (const path of plan.deleted) dispatch({ type: "deletedOnDisk", path });
+      if (plan.refreshTree) void refreshFiles();
+      if (plan.refreshGit) void refreshGit();
+      if (plan.rerender && current) void scheduler.now(open[current]?.text ?? "", current);
+    }, setLive);
+  }, [client, loadFile, refreshFiles, refreshGit, scheduler, session]);
 
   // Keep unsaved buffers in sessionStorage (FR-8).
   useEffect(() => {
@@ -340,6 +360,11 @@ function Workbench({ client }: { client: Client }) {
         <strong>LoomViz</strong>
         <span className="repo">{session.workspace}</span>
         <GitBadge status={gitStatus} />
+        {!live && (
+          <span className="status error" title="Changes made on disk won't show until the connection is back">
+            reconnecting…
+          </span>
+        )}
         <span className="spacer" />
         {active && <span className="current-file">{active}</span>}
         <button onClick={() => void save()} disabled={!isDirty(buffer)} title="Save (Ctrl/Cmd+S)">

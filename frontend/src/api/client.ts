@@ -1,5 +1,7 @@
 // Typed client for the LoomViz back-end (SPEC §11). Every call carries the launch token.
 
+import { connectEvents, type ServerEvent } from "./events";
+
 export interface WireEnd {
   connector: string;
   pin: number | string;
@@ -71,6 +73,10 @@ export function createClient(token: string, fetchFn: typeof fetch = fetch.bind(g
   }
 
   return {
+    /** Live file and git events (SPEC FR-9). Returns a function that disconnects. */
+    connectEvents(onEvent: (event: ServerEvent) => void, onConnected?: (connected: boolean) => void) {
+      return connectEvents(token, onEvent, onConnected);
+    },
     async session(): Promise<Session> {
       return (await call("/api/session")).json();
     },
