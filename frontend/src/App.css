@@ -628,3 +628,128 @@ button.location code {
   color: var(--accent);
   font-size: 13px;
 }
+
+/* --- editor toolbar and options panel (FR-39) --- */
+
+.editor-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.editor-toolbar .toggle {
+  font-size: 13px;
+  padding: 2px 10px;
+}
+
+.editor-toolbar .toggle.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.options-panel {
+  max-height: 45%;
+  overflow: auto;
+  padding: 8px 12px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 13px;
+}
+
+.options-intro {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+.options-intro a {
+  color: var(--accent);
+}
+
+.options-readonly {
+  color: var(--error-fg);
+  margin: 0 0 8px;
+}
+
+.options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px 16px;
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.option label {
+  font-weight: 600;
+}
+
+.option label code {
+  font-weight: normal;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.option small {
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.option-input {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+}
+
+.option-input select,
+.option-input input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.option-reset {
+  padding: 2px 6px;
+  font-size: 13px;
+}
+
+.color-input {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.color-input select {
+  flex: 1;
+  min-width: 0;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  flex: none;
+}
+
+.color-input input[type="color"] {
+  width: 32px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}

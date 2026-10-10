@@ -177,8 +177,32 @@ export const YamlEditor = forwardRef<YamlEditorHandle, Props>(function YamlEdito
     replaceText(targetPath: string, text: string) {
       const model = monaco.editor.getModel(uriFor(targetPath));
       if (!model || model.getValue() === text) return;
+      // Replace only the part that differs (common prefix and suffix kept), so the cursor stays
+      // put and undo restores exactly that edit (e.g. one line changed by the options form).
+      const old = model.getValue();
+      let start = 0;
+      while (start < old.length && start < text.length && old[start] === text[start]) start++;
+      let endOld = old.length;
+      let endNew = text.length;
+      while (endOld > start && endNew > start && old[endOld - 1] === text[endNew - 1]) {
+        endOld--;
+        endNew--;
+      }
+      const from = model.getPositionAt(start);
+      const to = model.getPositionAt(endOld);
       programmatic.current = true;
-      model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
+      model.pushStackElement(); // its own undo step, not merged with the previous form edit
+      model.pushEditOperations(
+        [],
+        [
+          {
+            range: new monaco.Range(from.lineNumber, from.column, to.lineNumber, to.column),
+            text: text.slice(start, endNew),
+          },
+        ],
+        () => null,
+      );
+      model.pushStackElement();
       programmatic.current = false;
     },
     dropModel(targetPath: string) {

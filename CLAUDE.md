@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 LoomViz is a web editor for [WireViz](https://github.com/wireviz/WireViz) wiring harness diagrams. It opens a local folder (usually a git repository) and edits the harness YAML in its `loom/` subfolder, with a live diagram; git stays in the user's own tools. M0–M2 are done (prototype with Monaco, two-way diagram/YAML selection, file tree, live reload, git status); Docker (M3) is written (Dockerfile, compose.yaml, scripts) but not yet run on a real Docker host; the user tests it on Linux.
 
-- [SPEC.md](SPEC.md): **what** LoomViz does. Requirements FR-1 to FR-34, tagged by release; removed ones are kept as stubs so numbers stay stable.
-- [PLAN.md](PLAN.md): **how**, **in what order** and **why**: milestone table, M2 step by step (build, verify, commit), and the decision log (D1–D17; D16 is the switch to local folders).
+- [SPEC.md](SPEC.md): **what** LoomViz does. Requirements FR-1 to FR-39, tagged by release; removed ones are kept as stubs so numbers stay stable.
+- [PLAN.md](PLAN.md): **how**, **in what order** and **why**: milestone table, M2 step by step (build, verify, commit), and the decision log (D1–D22; D16 is the switch to local folders).
 
 Work one PLAN step at a time: build, run its Verify check, then make the one commit it names, straight to `main`. When a change alters scope or a decision, update SPEC and PLAN together and keep FR and D numbers consistent.
 
@@ -35,5 +35,6 @@ Invariants that span many files and are easy to break:
 - **Untrusted output.** Diagram SVG and HTML document are built from file content: the SVG goes into the page only through `sanitizeSvg` (`frontend/src/preview/sanitize.ts`), and the HTML only into an `<iframe sandbox="">` with the blocking CSP from `document.ts`.
 - **Selection** (FR-31, FR-32) relies on ids the back-end adds before Graphviz runs (`wire-<cable>-<n>-a|b`, see `tag_wires`) and on node `<title>`s; the render result's `wires` map is WireViz's own resolution of each wire; `frontend/src/editor/locate.ts` maps between designators and YAML positions.
 - **YAML in the front-end** is parsed with the `yaml` package and `{ merge: true }` (WireViz files use repeated `<<` merge keys). Edits LoomViz makes itself (forms, M4) are text splices at node ranges; never re-serialise a whole document (`toString()`, ruamel `dump`), which rewrites WireViz's nested connection-list layout. The back-end never writes YAML through ruamel. Evidence: `spike/README.md`.
+- **Forms** (options editor FR-39, D22) edit through `frontend/src/editor/yamlEdit.ts` (`setSectionValue`/`removeSectionValue`), which formats values with YAML 1.1 rules because WireViz reads files with PyYAML (`yes`, `on`, `#ff0000` must be quoted). Form edits reach Monaco via `YamlEditor.replaceText`, which replaces only the differing range in its own undo step. The option fields are hand-written for WireViz 0.4.1 (`OptionsPanel.tsx`); colour codes in `wirevizColors.ts` come from `wireviz.wv_colors`.
 
 License: GPL-3.0 (WireViz is GPL-3.0 and is imported as a library).

@@ -11,6 +11,7 @@ import { planReload } from "./api/events";
 import { takeLaunchToken } from "./api/token";
 import { GitBadge } from "./GitBadge";
 import { locateAt, locateComponent } from "./editor/locate";
+import { OptionsPanel } from "./editor/OptionsPanel";
 import { YamlEditor, type EditorMarker, type YamlEditorHandle } from "./editor/YamlEditor";
 import { createRenderScheduler, initialPreview, type PreviewState } from "./preview/renderScheduler";
 import { Preview, type PreviewView } from "./preview/Preview";
@@ -114,6 +115,21 @@ function Workbench({ client }: { client: Client }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [view, setView] = useState<PreviewView>("diagram");
   const [selection, setSelection] = useState<Selection | null>(null);
+  // Options panel above the editor (FR-39), remembered.
+  const [optionsOpen, setOptionsOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem("loomviz.optionsOpen") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("loomviz.optionsOpen", optionsOpen ? "1" : "0");
+    } catch {
+      // not available: just not remembered
+    }
+  }, [optionsOpen]);
   // Document: BOM on its own sheet (FR-37), on by default and remembered.
   const [bomSheet, setBomSheet] = useState(() => {
     try {
@@ -491,6 +507,29 @@ function Workbench({ client }: { client: Client }) {
           onStep={(dx) => ((dragStart.current = layout), resize((l) => ({ ...l, tree: l.tree + dx }), true))}
         />
         <section className="editor-pane" aria-label="Editor">
+          {buffer && (
+            <div className="editor-toolbar">
+              <button
+                className={optionsOpen ? "toggle on" : "toggle"}
+                aria-expanded={optionsOpen}
+                onClick={() => setOptionsOpen((open) => !open)}
+                title="Edit the harness options (colours, font, BOM mode, …)"
+              >
+                ⚙ Options {optionsOpen ? "▴" : "▾"}
+              </button>
+            </div>
+          )}
+          {buffer && active && optionsOpen && (
+            <OptionsPanel
+              text={buffer.text}
+              onChange={(next) => {
+                // A form edit: update the buffer and the editor (one undoable edit there).
+                dispatch({ type: "edited", path: active, text: next });
+                editor.current?.replaceText(active, next);
+                if (autoRender) scheduler.schedule(next, active);
+              }}
+            />
+          )}
           {buffer?.conflict && (
             <div className="banner warning conflict" role="alert">
               <span>
