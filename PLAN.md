@@ -267,6 +267,8 @@ Fixes from that run go in as `docker: …` commits. When the smoke test passes, 
 - **Verify:** shellcheck; the script's logic against a stand-in `docker` with a native LoomViz playing the container (so the LAN check and the printed URLs are real); on the Linux machine: `--serve`, open the URL from another PC, `docker restart`, reboot, `--url`, `--stop`.
 - **Commit:** `docker: server mode (--serve, --url, --stop)`.
 
+**M3.8 status (2026-10-10):** built and checked with a stand-in `docker` whose "container" is a real native LoomViz in container-like mode. `--serve` reports "answers on the network", the printed LAN URL serves the page and the API, and `scripts/ui-smoke.mjs` passes through it. `--url` shows running and stopped states; `--stop` uses the saved settings; `--serve --tls` answers over HTTPS; the token survives stop and start. shellcheck clean. This caught a real bug: the compose wrapper treated the compose command as file names. On the Linux machine: `scripts/docker.sh <repo> --serve`, open the printed IP URL from another PC, `docker restart` / reboot (same URL keeps working), `--url`, `--stop`.
+
 **M3 exit criteria:**
 - SPEC §12 holds in Docker on macOS (and Linux if available).
 - `scripts/docker-smoke.sh` and all native tests pass.

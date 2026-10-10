@@ -34,4 +34,4 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     init: true  # reaps render workers stopped by the timeout
-    restart: "no"
+    restart: "${RESTART_POLICY:-no}"  # scripts/docker.sh --serve: unless-stopped

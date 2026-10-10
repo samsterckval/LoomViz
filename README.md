@@ -2,7 +2,7 @@
 
 A web-based editor for [WireViz](https://github.com/wireviz/WireViz) wiring harness diagrams. Point it at a folder (usually a git repository), edit the harness YAML files in its `loom/` subfolder with a live diagram, and keep using your own git tools to commit and push.
 
-Status: prototype (M2 done). Docker packaging (M3) is written but not yet tested on a real Docker host. See [SPEC.md](SPEC.md) for what LoomViz does and [PLAN.md](PLAN.md) for how it's being built.
+Status: v0.1 candidate: runs natively (macOS, Linux) and in Docker (tested on Linux), locally or on your network. See [SPEC.md](SPEC.md) for what LoomViz does and [PLAN.md](PLAN.md) for how it's being built.
 
 ## Try it
 
@@ -37,6 +37,34 @@ It prints a URL for each name and address this machine has on the network (e.g. 
 
 - **Plain HTTP sends the launch token unencrypted** over your network. Fine on a network you trust (home); otherwise use HTTPS. [mkcert](https://github.com/FiloSottile/mkcert) makes a certificate your browsers trust: `mkcert my-box.local 192.168.1.20`.
 - **Alternative without LAN mode:** an SSH tunnel from the other machine, `ssh -L 8000:127.0.0.1:8000 you@my-box`, then open `http://127.0.0.1:8000/?token=…` there.
+
+## Run it as a server on your network (Linux, Docker)
+
+One command, on the machine that has your harness repository:
+
+```bash
+scripts/docker.sh ~/my-harness-repo --serve                        # plain HTTP
+scripts/docker.sh ~/my-harness-repo --serve --tls box.pem box-key.pem   # HTTPS
+```
+
+It builds the image the first time, starts LoomViz in the background, checks that it answers on the network, and prints the URLs to open on your other computers, e.g. `http://192.168.1.20:8000/?token=…`. It restarts by itself, also after a reboot, and keeps the same URLs, so you can bookmark one.
+
+```bash
+scripts/docker.sh --url     # show the URLs again, and whether it's running
+scripts/docker.sh --stop    # stop it (start again with the same --serve command; the URLs stay the same)
+```
+
+The token is kept in `~/.local/state/loomviz/token` (readable only by you). Delete that file to get a new token, and so new URLs, on the next `--serve`.
+
+**Can't connect from the other computer?**
+1. **Use the IP URL first** (the `http://192.168.…` one). Names like `my-box.local` need mDNS: on Linux that's the `avahi-daemon` service, and not every network or OS resolves them.
+2. **Same network?** From the other computer, `ping 192.168.1.20` (the server's address) should answer. Guest Wi-Fi and some routers isolate devices from each other.
+3. **Does the page load without the token?** Open `http://192.168.1.20:8000/`: you should see LoomViz asking for its URL. If you do, the network is fine; copy the full URL with `?token=…` from `--url`.
+4. **Firewall.** Docker opens published ports past ufw, but other firewalls (firewalld, a cloud security group, a router between subnets) can still block the port.
+5. **The server's address changed** (DHCP): run `--serve` again so LoomViz accepts the new address, or give the machine a fixed address in your router. Requests addressed to an IP or name LoomViz doesn't know get "Host not allowed".
+6. **No Docker on hand?** An SSH tunnel works too: `ssh -L 8000:127.0.0.1:8000 you@my-box`, then open `http://127.0.0.1:8000/?token=…` on your own computer.
+
+Plain HTTP sends the token unencrypted on your network: fine at home, otherwise use `--tls` (see [mkcert](https://github.com/FiloSottile/mkcert) for a certificate your browsers trust).
 
 ## Run in Docker (Linux)
 
