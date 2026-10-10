@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-LoomViz is a web editor for [WireViz](https://github.com/wireviz/WireViz) wiring harness diagrams. It opens a local folder (usually a git repository) and edits the harness YAML in its `loom/` subfolder, with a live diagram; git stays in the user's own tools. A working prototype exists (M1); M2 is in progress.
+LoomViz is a web editor for [WireViz](https://github.com/wireviz/WireViz) wiring harness diagrams. It opens a local folder (usually a git repository) and edits the harness YAML in its `loom/` subfolder, with a live diagram; git stays in the user's own tools. M0–M2 are done (prototype with Monaco, two-way diagram/YAML selection, file tree, live reload, git status); Docker (M3) is next.
 
 - [SPEC.md](SPEC.md): **what** LoomViz does. Requirements FR-1 to FR-34, tagged by release; removed ones are kept as stubs so numbers stay stable.
 - [PLAN.md](PLAN.md): **how**, **in what order** and **why**: milestone table, M2 step by step (build, verify, commit), and the decision log (D1–D17; D16 is the switch to local folders).
@@ -13,15 +13,16 @@ Work one PLAN step at a time: build, run its Verify check, then make the one com
 
 ## Commands
 
-- Whole app: `scripts/dev.sh [folder]` (builds the front-end, serves everything on 127.0.0.1:8000; default folder `examples/`).
-- Back-end (`backend/`, uv, Python 3.12): `uv run loomviz ../examples`; `uv run pytest` (single test: `uv run pytest tests/test_render.py::test_renders_demo`); `uv run ruff check . && uv run ruff format --check .`; `uv run mypy loomviz`.
+- Whole app: `scripts/dev.sh [folder] [--port N]` (builds the front-end, serves everything on 127.0.0.1:8000; default folder `examples/`).
+- UI smoke test against a running app on `examples/`: `node scripts/ui-smoke.mjs "<printed URL>"` (headless Chrome via the DevTools protocol; `$CHROME` overrides the browser).
+- Back-end (`backend/`, uv, Python 3.12): `uv run loomviz ../examples`; `uv run pytest` (single test: `uv run pytest tests/test_render.py::test_renders_demo`); `uv run ruff check . && uv run ruff format --check .`; `uv run mypy loomviz`. `tests/test_server.py` runs a real uvicorn server (the test client bypasses uvicorn, so it can't catch missing WebSocket support).
 - Front-end (`frontend/`, pnpm): `pnpm dev` (Vite on :5173, proxies `/api` and `/ws` to a back-end on :8000; open `http://localhost:5173/?token=<token the back-end printed>`); `pnpm test` (Vitest; single file: `pnpm vitest run tests/token.test.ts`); `pnpm lint` (ESLint + Prettier check); `pnpm build`. TypeScript is pinned to 6.x because typescript-eslint doesn't support TS 7 yet.
 - Spike (`spike/`): `uv run pytest`, `uv run python bench.py`; `spike/roundtrip-ts`: `pnpm test`.
 - Not built yet: Docker (M3).
 
 ## Architecture in brief
 
-A FastAPI back-end (Python 3.12, `backend/loomviz/`) is started on a folder. It serves the built React + TypeScript front-end (`frontend/`), a file API confined to `loom/`, a render service that runs the `wireviz` library in worker processes, and (M2) read-only git status and a file-change WebSocket.
+A FastAPI back-end (Python 3.12, `backend/loomviz/`) is started on a folder. It serves the built React + TypeScript front-end (`frontend/`), a file API confined to `loom/`, a render service that runs the `wireviz` library in worker processes, read-only git status (`git.py`) and a file-change WebSocket (`watch.py`, `/ws/events`).
 
 Invariants that span many files and are easy to break:
 

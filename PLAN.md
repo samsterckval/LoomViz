@@ -10,8 +10,8 @@ v0.7 switched LoomViz to **opening a local folder, with git in the user's own to
 |---|---|---|
 | M0 | Feasibility spike: WireViz as a library, render speed, YAML round trips | Done (results in `spike/README.md`); git and container parts dropped |
 | M1 | Back-end (launch token, file API, render service), live-preview page, document view, diagram selection | Done, except Docker (now M3) and CI |
-| **M2** | **Editor and workspace: Monaco, two-way selection, file tree, unsaved-edit recovery, live reload, git status, zoom/pan, resizable layout** | **Next (§4)** |
-| M3 | Docker: one image, `compose.yaml` with the folder mounted, files owned by the user | Later; needs Docker on the dev machine |
+| M2 | Editor and workspace: Monaco, two-way selection, file tree, unsaved-edit recovery, live reload, git status, zoom/pan, resizable layout | Done (§4) |
+| **M3** | **Docker: one image, `compose.yaml` with the folder mounted, files owned by the user** | **Next; needs Docker on the dev machine** |
 | M4 | Forms (SPEC FR-25 to FR-28) | Later |
 | M5 | Export (FR-29), published image, docs, CI | Later (v1.0) |
 
@@ -110,6 +110,12 @@ Goal: SPEC §12's definition of done, minus Docker. Order: back-end first where 
 - **Commit:** `docs: M2 wrap-up`.
 
 **M2 exit criteria:** SPEC §12 holds natively on macOS (Docker items wait for M3); all tests pass.
+
+**M2 result (2026-10-10):** all ten steps done, one commit each. Notes:
+- M2.3 found that uvicorn had no WebSocket library (`websockets` added), invisible to the test client; `tests/test_server.py` now runs a real server.
+- watchfiles' default filter ignores `.git`, so the git watcher passes `watch_filter=None`; merged event flags (macOS) are resolved against the disk.
+- Monaco adds ~3 MB to the bundle (810 KB gzipped), accepted for offline use.
+- Known gaps: clicking a wire's row inside the cable box selects the cable, not the wire; FR-32 selects components, not individual wires; mouse-wheel zooms (no wheel-to-scroll).
 
 ## 5. Later milestones (outline)
 
