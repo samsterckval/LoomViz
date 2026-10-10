@@ -88,6 +88,18 @@ def parse_porcelain_v2(output: bytes, loom_prefix: str) -> dict[str, Any]:
     return {"repository": True, "branch": branch, "detached": detached, "changed": changed}
 
 
+def git_dir(workspace: Path) -> Path | None:
+    """The repository's git directory (handles worktrees and workspaces in a subfolder)."""
+    try:
+        result = _git(workspace, "rev-parse", "--absolute-git-dir")
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    path = Path(result.stdout.decode().strip())
+    return path if path.is_dir() else None
+
+
 def status(workspace: Path) -> dict[str, Any]:
     try:
         top = _git(workspace, "rev-parse", "--show-toplevel")

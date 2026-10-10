@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn>=0.30",
     "wireviz==0.4.1",
     "pyyaml>=6",
+    "watchfiles>=1.3.0",
 ]
 
 [project.scripts]

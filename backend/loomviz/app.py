@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -16,6 +18,7 @@ from .config import LOOM_FOLDER, Settings
 from .files import FileError, Workspace
 from .render import Renderer
 from .security import SecurityMiddleware
+from .watch import EventHub, run_watchers
 
 
 class RenameBody(BaseModel):
@@ -41,16 +44,26 @@ def create_app(settings: Settings) -> FastAPI:
         else None
     )
 
+    hub = EventHub()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        stop = asyncio.Event()
+        watchers = asyncio.create_task(run_watchers(workspace.root, hub, stop)) if workspace else None
         if renderer:
             renderer.warm_up()
         yield
+        stop.set()
+        if watchers:
+            watchers.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await watchers
         if renderer:
             renderer.close()
 
     app = FastAPI(title="LoomViz", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.renderer = renderer
+    app.state.hub = hub
     app.add_middleware(SecurityMiddleware, settings=settings)
 
     @app.exception_handler(FileError)
@@ -121,6 +134,21 @@ def create_app(settings: Settings) -> FastAPI:
     def delete_file(path: str) -> Response:
         open_workspace().delete(path)
         return Response(status_code=204)
+
+    # -- events (FR-9, FR-34) ------------------------------------------------------------------
+
+    @app.websocket("/ws/events")
+    async def events(websocket: WebSocket) -> None:
+        # The launch token and Host/Origin checks already ran in SecurityMiddleware.
+        await websocket.accept()
+        queue = hub.subscribe()
+        try:
+            while True:
+                await websocket.send_json(await queue.get())
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            hub.unsubscribe(queue)
 
     # -- rendering ------------------------------------------------------------------------------
 
