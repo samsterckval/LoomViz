@@ -103,7 +103,7 @@ One page:
 - **FR-10** (v0.1): The YAML editor is Monaco with YAML syntax highlighting, line numbers and folding, and marks render errors at their line.
 
 ### 8.3 Live preview
-- **FR-11** (v0.1): After an edit and a debounce (default 400 ms), the editor content (saved or not) is rendered and the SVG shown. Images the harness references by relative path are resolved from the file's location inside `loom/` and embedded in the SVG, so the preview shows them.
+- **FR-11** (v0.1): Rendering is explicit: a **Render** button (and Ctrl/Cmd+Enter) renders the editor content, saved or not. Opening a file, reloading it from disk and switching to the Document view also render. After an edit, the button shows the diagram is out of date. An **Auto** option (off by default, remembered) renders after each edit with a debounce (400 ms) instead (PLAN D20). Images the harness references by relative path are resolved from the file's location inside `loom/` and embedded in the SVG, so the preview shows them.
 - **FR-12** (v0.1): Stale renders are cancelled; only the latest result is shown.
 - **FR-13** (v0.1): Render errors appear in a banner and in the editor, with line numbers where available. The last good diagram stays visible.
 - **FR-14** (v0.1): Renders are cached by content hash.
