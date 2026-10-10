@@ -326,3 +326,11 @@ button.location code {
   color: var(--muted);
   white-space: nowrap;
 }
+
+.git {
+  font-size: 14px;
+}
+
+.git .changed {
+  color: var(--accent);
+}

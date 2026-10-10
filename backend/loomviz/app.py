@@ -11,6 +11,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
+from . import git
 from .config import LOOM_FOLDER, Settings
 from .files import FileError, Workspace
 from .render import Renderer
@@ -83,6 +84,10 @@ def create_app(settings: Settings) -> FastAPI:
         ws = open_workspace()
         ws.loom.mkdir(exist_ok=True)
         return {"loom_folder": LOOM_FOLDER, "loom_folder_exists": True}
+
+    @app.get("/api/git/status")
+    def git_status() -> dict[str, Any]:
+        return git.status(open_workspace().root)
 
     # -- files ----------------------------------------------------------------------------------
 

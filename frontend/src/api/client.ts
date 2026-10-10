@@ -33,6 +33,16 @@ export interface Session {
   loom_folder_exists?: boolean;
 }
 
+/** Read-only git status of the workspace, limited to files under loom/ (SPEC FR-34). */
+export type GitStatus =
+  | { repository: false }
+  | {
+      repository: true;
+      branch: string | null;
+      detached: boolean;
+      changed: { path: string; status: string }[];
+    };
+
 export class ApiError extends Error {
   readonly status: number;
   constructor(status: number, message: string) {
@@ -67,6 +77,9 @@ export function createClient(token: string, fetchFn: typeof fetch = fetch.bind(g
     /** Create the loom/ folder in the workspace (SPEC FR-33). */
     async createLoomFolder(): Promise<void> {
       await call("/api/loom", { method: "POST" });
+    },
+    async gitStatus(): Promise<GitStatus> {
+      return (await call("/api/git/status")).json();
     },
     async listFiles(): Promise<FileList> {
       return (await call("/api/files")).json();

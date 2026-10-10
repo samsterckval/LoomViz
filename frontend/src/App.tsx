@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, createClient, type Client, type FileList, type Session } from "./api/client";
+import {
+  ApiError,
+  createClient,
+  type Client,
+  type FileList,
+  type GitStatus,
+  type Session,
+} from "./api/client";
 import { takeLaunchToken } from "./api/token";
+import { GitBadge } from "./GitBadge";
 import { locateComponent } from "./editor/locate";
 import { createRenderScheduler, initialPreview, type PreviewState } from "./preview/renderScheduler";
 import { Preview, type PreviewView } from "./preview/Preview";
@@ -34,6 +42,7 @@ export default function App() {
 function Editor({ client }: { client: Client }) {
   const [session, setSession] = useState<Session | null>(null);
   const [files, setFiles] = useState<FileList | null>(null);
+  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [open, setOpen] = useState<OpenFile | null>(null);
   const [text, setText] = useState("");
   const [preview, setPreview] = useState<PreviewState>(initialPreview);
@@ -69,6 +78,7 @@ function Editor({ client }: { client: Client }) {
       .then(([s, f]) => {
         setSession(s);
         setFiles(f);
+        void client.gitStatus().then(setGitStatus, () => setGitStatus(null));
         if (f.files.length > 0) return openFile(f.files[0]);
       })
       .catch((err: unknown) =>
@@ -158,6 +168,7 @@ function Editor({ client }: { client: Client }) {
       <header>
         <strong>LoomViz</strong>
         <span className="repo">{session.workspace}</span>
+        <GitBadge status={gitStatus} />
         <select
           value={open?.path ?? ""}
           onChange={(e) => switchTo(e.target.value)}
