@@ -33,13 +33,14 @@ def check_bind(settings: Settings) -> None:
     """Refuse non-loopback addresses unless LOOMVIZ_ALLOW_REMOTE=1 (set only inside Docker)."""
     if not is_loopback(settings.host) and not settings.allow_remote:
         raise SystemExit(
-            f"Refusing to listen on {settings.host}: LoomViz offers a shell and holds git credentials. "
+            f"Refusing to listen on {settings.host}: LoomViz can read and write files in your folder. "
             "Use 127.0.0.1, or set LOOMVIZ_ALLOW_REMOTE=1 if a container or firewall restricts access."
         )
 
 
 def allowed_hosts(settings: Settings) -> set[str]:
-    return {f"{name}:{settings.port}" for name in ("127.0.0.1", "localhost", "[::1]")}
+    # The port the browser addresses: in Docker, the host-side port (D18).
+    return {f"{name}:{settings.browser_port}" for name in ("127.0.0.1", "localhost", "[::1]")}
 
 
 def allowed_origins(settings: Settings) -> set[str]:

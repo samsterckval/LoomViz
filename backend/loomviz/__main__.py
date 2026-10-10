@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import uvicorn
@@ -23,6 +24,10 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--frontend-dist", type=Path, help="folder with the built front-end")
     args = parser.parse_args()
+
+    if os.environ.get("LOOMVIZ_POLL") == "1":
+        # Bind mounts that don't deliver file events: make watchfiles poll instead.
+        os.environ["WATCHFILES_FORCE_POLLING"] = "true"
 
     settings = Settings(host=args.host, port=args.port)
     if not args.folder.is_dir():

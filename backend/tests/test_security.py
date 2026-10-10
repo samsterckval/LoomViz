@@ -80,3 +80,56 @@ def test_session_payload(client):
         "workspace": "repo",
         "loom_folder_exists": True,
     }
+
+
+# --- running behind a port mapping (Docker, D18) -----------------------------------------------
+
+
+def test_public_port_is_what_the_host_check_accepts(workspace, tmp_path):
+    with make_client(workspace, tmp_path, port=8000, public_port=8100) as c:
+        assert c.get("/api/session", headers={"Host": "127.0.0.1:8100"}).status_code == 200
+        assert (
+            c.get(
+                "/api/session", headers={"Host": "localhost:8100", "Origin": "http://localhost:8100"}
+            ).status_code
+            == 200
+        )
+        # The container-internal port isn't what the browser uses, so it's refused.
+        assert c.get("/api/session", headers={"Host": "127.0.0.1:8000"}).status_code == 403
+        assert (
+            c.get(
+                "/api/session", headers={"Host": "127.0.0.1:8100", "Origin": "http://127.0.0.1:8000"}
+            ).status_code
+            == 403
+        )
+
+
+def test_launch_url_uses_loopback_and_public_port():
+    s = Settings(host="0.0.0.0", port=8000, public_port=8100, token="t")
+    assert s.launch_url == "http://127.0.0.1:8100/?token=t"
+    assert Settings(host="127.0.0.1", port=8000, token="t").launch_url == "http://127.0.0.1:8000/?token=t"
+
+
+def test_container_settings_from_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOOMVIZ_PUBLIC_PORT", "8123")
+    monkeypatch.setenv("LOOMVIZ_FRONTEND_DIST", str(tmp_path))
+    s = Settings()
+    assert s.browser_port == 8123
+    assert s.frontend_dist == tmp_path
+    monkeypatch.delenv("LOOMVIZ_PUBLIC_PORT")
+    assert Settings(port=8001).browser_port == 8001
+
+
+def test_poll_switch_sets_watchfiles_polling(monkeypatch, tmp_path):
+    import sys
+
+    from loomviz import __main__ as cli
+
+    monkeypatch.setenv("LOOMVIZ_POLL", "1")
+    monkeypatch.delenv("WATCHFILES_FORCE_POLLING", raising=False)
+    monkeypatch.setattr(sys, "argv", ["loomviz", str(tmp_path)])
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: None)  # don't actually serve
+    cli.main()
+    import os
+
+    assert os.environ["WATCHFILES_FORCE_POLLING"] == "true"
