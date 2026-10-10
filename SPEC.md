@@ -23,6 +23,7 @@ A session:
 |---|---|
 | Session | One run of the container, from opening a repository to "End session". One repository per session. |
 | Working tree | The cloned repository inside the container. Within a session, it is the single source of truth: editor, renderer and terminal all work on it. |
+| Loom folder | The `loom/` folder at the root of the repository. It holds the harness YAML files (and any images they reference). The file tree and file API only see this folder; the terminal and git see the whole repository. |
 | Git token | The user's credential for the git host (personal access token or app password). |
 | Launch token | A random secret LoomViz generates at startup and prints in its URL. Every request to LoomViz must carry it. Unrelated to git. |
 | Work state | Where the user's changes are: unsaved (in the editor only), uncommitted, unpushed, or all pushed. |
@@ -102,13 +103,13 @@ One page, shown after a repository is open:
 - **FR-6** (later: git extras): SSH key authentication (upload or paste, optional passphrase), with `ssh://` and scp-style URLs. Host keys of GitHub, GitLab and Bitbucket are pre-trusted; for other hosts the user confirms the fingerprint.
 
 ### 8.2 Files and editing
-- **FR-7** (v0.1): The file tree lists `.yml`/`.yaml` files in the working tree (recursively, skipping `.git`) and supports open, create, rename and delete (with confirmation).
+- **FR-7** (v0.1): The file tree lists the `.yml`/`.yaml` files in the loom folder (recursively, subfolders allowed) and supports open, create, rename and delete (with confirmation). Files outside `loom/` are not shown. If the repository has no `loom/` folder, LoomViz says so after cloning and offers to create it; it appears in git with the first saved file. The folder name is fixed in v0.1.
 - **FR-8** (v0.1): Saving is explicit (Ctrl/Cmd+S) and writes to the working tree. Open files show a dirty indicator. Unsaved editor content survives a page reload (kept in the browser tab's `sessionStorage`, which never holds credentials).
 - **FR-9** (v0.1): Files changed by other means (terminal edits, `git pull`, `git checkout`) are detected. Open files without unsaved edits reload; files with unsaved edits show a conflict prompt.
 - **FR-10** (v0.1): The YAML editor highlights syntax and marks render errors at their line.
 
 ### 8.3 Live preview
-- **FR-11** (v0.1): After an edit and a debounce (default 400 ms), the editor content (saved or not) is rendered and the SVG shown.
+- **FR-11** (v0.1): After an edit and a debounce (default 400 ms), the editor content (saved or not) is rendered and the SVG shown. Images the harness references by relative path are resolved from the file's location inside `loom/` and embedded in the SVG, so the preview shows them.
 - **FR-12** (v0.1): Stale renders are cancelled; only the latest result is shown.
 - **FR-13** (v0.1): Render errors appear in a banner and in the editor, with line numbers where available. The last good diagram stays visible.
 - **FR-14** (v0.1): Renders are cached by content hash.
@@ -202,12 +203,12 @@ Git:
 - `POST /api/git/pull`: pull with rebase.
 - Later: `POST /api/git/pr`: `{title, body, base}`, returns the pull request URL.
 
-Files and rendering:
-- `GET /api/files`: list YAML files.
+Files and rendering (all file paths are relative to the loom folder and cannot leave it):
+- `GET /api/files`: `{loom_folder_exists, files: [...]}`, the YAML files in `loom/`.
 - `GET /api/files/{path}`: read a file (with `ETag`).
 - `PUT /api/files/{path}`: write a file (`If-Match` for conflict detection).
 - `POST /api/files/{path}/rename`, `DELETE /api/files/{path}`.
-- `POST /api/render`: `{yaml}` → `{svg, warnings}` or `{error, line?}`.
+- `POST /api/render`: `{yaml, path?}` → `{svg, warnings}` or `{error, line?}`. `path` (relative to `loom/`) is the file being edited; relative image paths resolve against it.
 - Later: `GET /api/schema` (forms), `POST /api/export` (export).
 
 WebSockets:

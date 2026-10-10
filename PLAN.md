@@ -1,262 +1,234 @@
-# PLAN: LoomViz
+# PLAN: LoomViz, M0 and M1
 
-Status: v0.5 (2026-10-10), matching [SPEC.md](SPEC.md) v0.5. SPEC says **what** LoomViz does; this file says **how**, **in what order**, and **why**. When a decision changes scope, update both.
+Status: proposal, 2026-10-10, for [SPEC.md](SPEC.md) v0.5. SPEC says **what** LoomViz does; this file says **how**, **in what order** and **why**. It covers only the first two milestones. Later milestones are planned once M1 is done; the earlier full outline (M0–M7) is in commit `8eb109b`.
 
-## 1. Approach
+All open questions are resolved; the answers are in §5.
 
-Build bottom-up and keep every milestone runnable.
+## 1. Scope
 
-1. **M0, spike:** prove the risky parts in throwaway scripts: WireViz as a library, render speed, comment-preserving YAML edits, and clone/push with a git token inside a locked-down, stateless container.
-2. **M1–M2, editor core:** render service, file API, editor and preview, built against a local folder in a development mode so we don't need git for every test run.
-3. **M3, project session:** wrap the editor in the real flow: open repository → edit → commit/push → end session, in the stateless container.
-4. **M4, terminal:** completes v0.1.
-5. **After v0.1:** forms (M5), git extras (M6), polish and distribution (M7).
-
-| Milestone | Delivers | Release |
+| Milestone | Goal | Ends with |
 |---|---|---|
-| M0 | Feasibility spike | v0.1 |
-| M1 | Render service + minimal page | v0.1 |
-| M2 | Editor and file browser | v0.1 |
-| M3 | Project session and save-to-remote | v0.1 |
-| M4 | Terminal | v0.1 (tag `v0.1.0`) |
-| M5 | Forms | later |
-| M6 | SSH keys, new branches, pull requests | later |
-| M7 | Export, published image, docs | v1.0 |
+| **M0: Feasibility spike** | Prove the risky parts in throwaway scripts before writing app code: WireViz as a library, render speed, comment-preserving YAML edits, and clone/push with a git token inside a locked-down, stateless container. | `spike/README.md` with measured results and a go/no-go per risk. |
+| **M1: Render service + minimal page** | First real app code: FastAPI back-end with launch-token security, file API and render service; a minimal React page that live-renders YAML; a Docker image. Runs in development mode against a local folder (no git yet). | Typing YAML in the browser updates the diagram; bad YAML shows an error and keeps the last diagram. Works locally and in Docker. |
 
-## 2. Decision log
+Out of scope here: Monaco, file tree UI, cloning from the app, git endpoints, terminal, forms (M2 and later).
+
+## 2. Ground rules
+
+- **Every step ends in one commit** (occasionally two, if noted) on `main`. Each commit leaves lint and tests green.
+- **Commit messages:** `<area>: <what>`, e.g. `spike: render YAML via wireviz API`, `backend: add launch token middleware`. Every commit ends with the `Co-Authored-By` trailer.
+- **No secrets in the repo.** Spike credentials come from environment variables or an untracked `.env`; `.gitignore` covers `.env`, `*.token` and spike output.
+- **Spike code lives in `spike/`** and is never imported by app code. It stays in the repo as a record until M3, when the app covers the same ground.
+- **"Verify"** is a command (or short manual check) you can run yourself. Expected output is stated.
+
+## 3. M0: Feasibility spike
+
+Prerequisites: Docker, [uv](https://docs.astral.sh/uv/), Node 20+ with pnpm, Graphviz (`brew install graphviz`) for local runs.
+
+### M0.1 Repository basics
+- **Build:** `LICENSE` (GPL-3.0 full text), `.gitignore` (Python, Node, `.env`, `spike/out/`), a one-paragraph `README.md` pointing to SPEC and PLAN.
+- **Verify:** `head -3 LICENSE` shows "GNU GENERAL PUBLIC LICENSE Version 3"; `git status` is clean after the commit.
+- **Commit:** `repo: add GPL-3.0 license, gitignore and README stub`, plus `CLAUDE.md`.
+
+### M0.2 Example harnesses
+- **Build:** `examples/`, laid out like a real loom repository (D13): harness files in `examples/loom/`, plus a stray `examples/.github/workflows/ci.yml` and `examples/docker-compose.yml` that the file API must ignore. In `examples/loom/`:
+  - `small.yml` (~3 connectors), `medium.yml` (~20), `large.yml` (~60+), adapted from the upstream WireViz tutorial and examples (GPL-3.0, attribution in `examples/README.md`), with medium and large in a subfolder to exercise nesting;
+  - `commented.yml`, with comments in many places (for the round-trip tests);
+  - `broken-syntax.yml` (invalid YAML) and `broken-semantic.yml` (valid YAML, invalid WireViz, e.g. a connection to a pin that doesn't exist);
+  - `with-image.yml` in a subfolder, referencing a PNG in a sibling folder by relative path (e.g. `../images/connector.png`), for D14.
+- **Verify:** `uvx --from wireviz==<pinned> wireviz -f s examples/loom/small.yml` (and medium, large, commented) produces an `.svg`; both broken files fail with an error.
+- **Commit:** `examples: add sample harnesses for tests and benchmarks`.
+
+### M0.3 Render through the library
+- **Build:** `spike/pyproject.toml` (uv, wireviz pinned to the latest PyPI release, ruamel.yaml, jsonschema) and `spike/render.py`: takes a YAML string and returns an SVG string through the wireviz Python API, not the CLI. Findings in `spike/README.md`:
+  - which function is the entry point;
+  - whether it needs an output directory or temp files;
+  - how errors surface (exception types, whether line numbers are available);
+  - how relative image paths resolve (relative to the working directory, an argument, or the YAML file's location?) and how they appear in the SVG output, which decides how M1.5 inlines them (D14);
+  - whether module-level state leaks between calls (render A, B, A in one process and compare A's two outputs byte for byte).
+- **Verify:** `uv run --project spike spike/render.py examples/loom/small.yml > spike/out/small.svg`, then open the SVG. `uv run --project spike spike/render.py --state-check` prints `state leak: no` (or documents the leak).
+- **Commit:** `spike: render YAML to SVG via the wireviz API`.
+
+### M0.4 Benchmark
+- **Build:** `spike/bench.py`: for small, medium and large, measure cold (fresh process) and warm (same process) render time, split into parse and Graphviz time, 5 runs each, median reported.
+- **Verify:** `uv run --project spike spike/bench.py` prints a Markdown table; it goes into `spike/README.md`. Target from SPEC §9: medium under ~1 s warm.
+- **Commit:** `spike: render benchmark and results`.
+
+### M0.5 YAML round trip, Python
+- **Build:** `spike/roundtrip.py`: for each example, load with ruamel.yaml (round-trip mode), dump unchanged and compare with the original, then change one scalar (e.g. a connector's `pincount`) and diff.
+- **Verify:** `uv run --project spike spike/roundtrip.py` exits 0. For every file: the unchanged dump is identical, or the differences are listed; the one-value edit changes exactly one line.
+- **Commit:** `spike: ruamel.yaml round-trip check`.
+
+### M0.6 YAML round trip, TypeScript (confirms D7)
+- **Build:** `spike/roundtrip-ts/` (package.json, `yaml` npm package, tsx): the same two checks with the `yaml` Document API (`parseDocument`, `setIn`, `toString`).
+- **Verify:** `pnpm --dir spike/roundtrip-ts install && pnpm --dir spike/roundtrip-ts start` exits 0 with the same per-file report. If a file doesn't round-trip cleanly, the formatting differences are recorded, plus whether `toString` options fix them.
+- **Commit:** `spike: yaml (npm) round-trip check`.
+
+### M0.7 JSON Schema reconnaissance (D4, time-boxed to half a day)
+- **Build:** a note in `spike/README.md` on whether upstream publishes a schema. If not, `spike/schema.py` generates a draft JSON Schema from the wireviz dataclasses and validates all examples against it.
+- **Verify:** `uv run --project spike spike/schema.py` prints, per example, valid/invalid with reasons; the broken-semantic file should ideally be invalid. Gaps (e.g. the `connections` syntax) are listed.
+- **Commit:** `spike: JSON Schema reconnaissance`.
+
+### M0.8 Locked-down container
+- **Build:** `spike/docker/Dockerfile` (`python:3.12-slim`, apt: graphviz, fonts-dejavu, git; non-root user; spike scripts installed with uv) and `spike/docker/compose.yaml` with the target hardening: `read_only: true`, tmpfs for `/workspace`, `/run/loomviz`, `/tmp` and `$HOME`, `cap_drop: [ALL]`, `no-new-privileges`, no volumes except the examples mounted read-only (spike only).
+- **Verify:**
+  - `docker compose -f spike/docker/compose.yaml run --rm spike python render.py /examples/loom/medium.yml | head -c 200` shows `<svg` (wireviz and Graphviz work on a read-only filesystem);
+  - `docker compose -f spike/docker/compose.yaml run --rm spike python bench.py` gives a second benchmark table, added to `spike/README.md`;
+  - `docker compose -f spike/docker/compose.yaml run --rm spike id` shows a non-root uid.
+- **Commit:** `spike: render inside a read-only, tmpfs-only container`.
+
+### M0.9 Clone and push with a git token
+- **Build:**
+  - `spike/docker/loomviz-credential`, a git credential helper that answers `get` from `/run/loomviz/credentials`;
+  - `spike/docker/git-spike.sh`, which:
+    - writes `/run/loomviz/gitconfig` (author identity, `credential.helper`) and the 0600 credentials file from `SPIKE_GIT_USER`/`SPIKE_GIT_TOKEN`;
+    - sets `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1` and `GIT_TERMINAL_PROMPT=0`;
+    - clones `SPIKE_GIT_URL` into `/workspace` with `-c core.hooksPath=/dev/null -c protocol.allow=never -c protocol.https.allow=always`;
+    - edits a file, commits, pushes;
+    - then runs leak checks: the token is absent from `.git/config`, `git remote -v`, the command line of every process (`/proc/*/cmdline`) and the script's own output.
+  - Test target: the empty private repository you create, with a token limited to that repo. Because it starts empty, the script checks whether the clone has any commits and, if not, creates the first commit on `main` and pushes with `-u origin main`. A second run then exercises the normal path (existing branch, fast-forward push).
+- **Verify:** `SPIKE_GIT_URL=… SPIKE_GIT_USER=… SPIKE_GIT_TOKEN=… docker compose -f spike/docker/compose.yaml run --name loomviz-spike spike ./git-spike.sh` prints `PASS` for clone, commit, push and each leak check; the commit appears on the remote. Run it twice (`docker rm loomviz-spike` in between): the first run initialises the empty repo, the second pushes on top.
+- **Commit:** `spike: clone and push with credential helper on tmpfs`.
+
+### M0.10 Leftover inspection
+- **Build:** `spike/docker/inspect.sh <container> <token>`: after the M0.9 container stops, it runs `docker diff`, `docker export | tar -t`, a search of the exported filesystem, `docker inspect` (environment, mounts) and `docker logs`, all searched for the token and the clone.
+- **Verify:** `./spike/docker/inspect.sh loomviz-spike "$SPIKE_GIT_TOKEN"` prints `PASS: no trace` for each check, then `docker rm loomviz-spike`. Note: the token was passed in as an environment variable for the spike, so `docker inspect` *will* show it. That is expected here, and is why the real app takes the token through the UI (M3). The script reports this check separately.
+- **Commit:** `spike: post-stop inspection for leftover data`.
+
+### M0.11 Results and go/no-go
+- **Build:** `spike/README.md` completed with one section per risk (rendering API, state leaks, performance local/Docker, round-trip Python/TS, schema, read-only container, credentials, leftovers): result, evidence (command + output excerpt), and consequence for M1. PLAN.md's decision log updated (D4, D7 confirmed or revised); blockers listed with a proposed workaround.
+- **Verify:** you review `spike/README.md`; every M0 step above has a result.
+- **Commit:** `docs: M0 results` (spike README, PLAN).
+
+**M0 exit criteria:** every check above has a recorded result; D4 and D7 confirmed or revised; no unresolved blocker for M1.
+
+## 4. M1: Render service + minimal page
+
+Layout after M1:
+
+```
+backend/   pyproject.toml, loomviz/{__main__,app,config,security,files,render}.py, tests/
+frontend/  Vite + React + TypeScript, src/{api,preview}/, tests/
+Dockerfile, compose.dev.yaml
+```
+
+### M1.1 Back-end skeleton and tooling
+- **Build:** `backend/pyproject.toml` (uv; fastapi, uvicorn, wireviz pinned to the M0 version, ruamel.yaml; dev: pytest, httpx, ruff, mypy), package `loomviz` with an app factory and CLI `loomviz --dev-workspace <dir> [--port 8000]`. Dev mode means a session is already open on that folder. `GET /api/session` returns `{state: "open", repo: "<folder name>", branch: null}` in dev mode and `{state: "none"}` otherwise.
+- **Verify:** `cd backend && uv run ruff check . && uv run mypy loomviz && uv run pytest` all pass (one smoke test calls `/api/session`). `uv run loomviz --dev-workspace ../examples` starts and logs its URL.
+- **Commit:** `backend: FastAPI skeleton, CLI and tooling`.
+
+### M1.2 Launch token, Origin/Host checks, binding rules
+- **Build:** `security.py`:
+  - **launch token:** random 32-byte token, or `LOOMVIZ_TOKEN`; startup prints `http://127.0.0.1:<port>/?token=…`; `Authorization: Bearer` on HTTP and a `token` query parameter on WebSockets (no WebSocket route yet, so it's tested on a test-only route);
+  - **Host check:** `127.0.0.1:<port>` or `localhost:<port>`;
+  - **Origin check:** same host, or absent for non-browser clients;
+  - **binding:** refuse non-loopback addresses unless `LOOMVIZ_ALLOW_REMOTE=1`.
+- **Verify:** `uv run pytest tests/test_security.py` covers missing token → 401, wrong token → 401, foreign `Host` (DNS rebinding) → 403, foreign `Origin` → 403, valid request → 200, `--host 0.0.0.0` without the env var exits with an error. Manual: `curl -i localhost:8000/api/session` → 401; with `-H "Authorization: Bearer $TOKEN"` → 200.
+- **Commit:** `backend: launch token, Origin/Host checks and bind rules`.
+
+### M1.3 File API: list and read
+- **Build:** `files.py` with one sandboxing function whose root is `<workspace>/loom` (D13): it resolves symlinks and rejects `..`, absolute paths and anything outside `loom/`. `GET /api/files` returns `{loom_folder_exists, files}` (recursive `.yml`/`.yaml` under `loom/`); `GET /api/files/{path}` returns content + `ETag`.
+- **Verify:** `uv run pytest tests/test_files.py` covers: the listing (nested folders; `.github/` and root-level YAML outside `loom/` not listed); a workspace without `loom/` → `loom_folder_exists: false`, empty list; reading; `../README.md` (escaping `loom/` into the repo) → 400; `../../etc/passwd` → 400; absolute path → 400; symlink pointing outside `loom/` → 400; missing file → 404.
+- **Commit:** `backend: file listing and reading with path sandboxing`.
+
+### M1.4 File API: write, rename, delete
+- **Build:** `PUT /api/files/{path}` (atomic: temp file in the same directory + `os.replace`; `If-Match` required for existing files, 412 on mismatch; creates new files when `If-None-Match: *`), `POST /api/files/{path}/rename`, `DELETE /api/files/{path}`. Only `.yml`/`.yaml` targets allowed. Writing the first file creates `loom/` (and any subfolders) if missing.
+- **Verify:** `uv run pytest tests/test_files.py` adds: in a workspace without `loom/`, writing `loom`-relative `a.yml` creates `loom/a.yml`; write then read returns new content and a new ETag; stale `If-Match` → 412 and file unchanged; no temp files left after a write; rename onto an existing file → 409; delete then read → 404; writing `foo.txt` → 400.
+- **Commit:** `backend: file write, rename and delete with ETag conflicts`.
+
+### M1.5 Render service
+- **Build:** `render.py` and `POST /api/render {yaml, path?}`. Shape:
+  - wireviz runs in a `ProcessPoolExecutor` (2 workers) with a per-render timeout (default 10 s); a timed-out worker is killed and the pool is replaced;
+  - each render gets its own temp directory under `/tmp`, if M0 shows wireviz needs one;
+  - responses are `{svg, warnings}` or `{error, line?}` (HTTP 200 in both cases, since an invalid harness is a normal state, not a server error);
+  - YAML syntax errors carry the line from the parser; WireViz errors carry a line when M0 found a way to recover one;
+  - images (D14): `path` is checked by the M1.3 sandboxing function; relative image references resolve against its folder; each referenced image must also pass the sandbox (outside `loom/` → a warning and a placeholder, not an error) and is inlined into the SVG as a data URI. Without `path`, relative images resolve against `loom/` itself.
+- **Verify:** `uv run pytest tests/test_render.py` covers: each valid example → body starts with `<svg`; `with-image.yml` with its `path` → the SVG contains a `data:image/png;base64,` URI and no file path; an image reference escaping `loom/` → a warning, no file content leaked; `broken-syntax.yml` → `error` with the correct `line`; `broken-semantic.yml` → `error`; a deliberately slow render (test hook) → timeout error, and the next render still succeeds. Manual: `curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$(jq -Rs '{yaml: .}' ../examples/loom/small.yml)" localhost:8000/api/render | jq -r .svg > /tmp/small.svg`.
+- **Commit:** `backend: render service with worker pool and timeout`.
+
+### M1.6 Render cache
+- **Build:** an in-memory LRU (default 128 entries) keyed by SHA-256 of `yaml` + `path` + WireViz version + the size and modification time of each referenced image, in front of the pool.
+- **Verify:** `uv run pytest tests/test_render.py` adds: the same YAML twice → the second call doesn't reach the pool (counter or mock); one changed character → a miss; a different WireViz version string → a miss; replacing the referenced image file → a miss.
+- **Commit:** `backend: render cache`.
+
+### M1.7 Front-end skeleton
+- **Build:** `frontend/` with Vite + React + TypeScript (pnpm), ESLint, Prettier and Vitest. Plus:
+  - `src/api/`: a typed client that adds the bearer token;
+  - token handling: read `?token=` on load, store it in `sessionStorage`, remove it from the address bar with `history.replaceState`;
+  - the Vite dev server proxies `/api` and `/ws` to `127.0.0.1:8000`.
+- **Verify:** `cd frontend && pnpm lint && pnpm test && pnpm build` pass. `pnpm test` includes token handling: taken from the URL, stored, URL cleaned, reused after reload.
+- **Commit:** `frontend: Vite + React skeleton, API client and token handling`.
+
+### M1.8 Live preview page
+- **Build:** one page with a file picker (a plain `<select>` fed by `GET /api/files`), a textarea with the file content, and a preview panel. Behaviour:
+  - debounce 400 ms; each render request gets an increasing id and an `AbortController`; responses older than the latest are dropped;
+  - the last good SVG stays visible under an error banner showing the message and line;
+  - the SVG is displayed as an `<img>` from a blob URL, not injected into the DOM, so any script in an SVG built from repository content can't run in the page that holds the launch token. Zoom/pan in M2 works on the image.
+  - "Save" (button + Ctrl/Cmd+S) via `PUT` with `If-Match`, showing a message on 412.
+- **Verify:**
+  - `pnpm test` (Vitest, fake timers, mocked fetch): typing quickly sends one request; a slow first response arriving after a fast second one is ignored; an error keeps the previous SVG and shows the banner.
+  - Manual, two terminals: `cd backend && uv run loomviz --dev-workspace ../examples` and `cd frontend && pnpm dev`, then open `http://localhost:5173/?token=<printed token>`. Pick `medium.yml`, change a wire colour and see the diagram update within about a second. Break the indentation: error banner with the line, old diagram stays. Fix it: the banner disappears. Open `with-image.yml`: the image shows in the diagram. Save, then check the file on disk with `git diff examples/`, and revert it.
+- **Commit:** `frontend: live preview with debounce, cancellation and save`.
+
+### M1.9 Serve the built front-end from the back-end
+- **Build:** FastAPI serves `frontend/dist` (path from config) at `/`, with SPA fallback; API routes take precedence. The static files themselves don't need the token (they contain no data); the API calls they make do.
+- **Verify:** `cd frontend && pnpm build && cd ../backend && uv run loomviz --dev-workspace ../examples`, open the printed URL: the same page works from one port. `uv run pytest` includes a test that `/` returns `index.html` and `/api/session` without a token still returns 401.
+- **Commit:** `backend: serve the built front-end`.
+
+### M1.10 Docker image (development mode)
+- **Build:**
+  - multi-stage `Dockerfile`: stage 1 runs `node:20-slim` + pnpm to build the front-end; stage 2 is `python:3.12-slim` + apt graphviz, fonts-dejavu and git, the back-end installed with uv, the front-end copied in, a non-root user, `LOOMVIZ_ALLOW_REMOTE=1`, and listening on `0.0.0.0:8000`.
+  - `compose.dev.yaml` for M1: mounts `./examples` at `/workspace` (dev mode only; the stateless production `compose.yaml` comes in M3), publishes `127.0.0.1:8000:8000`, and already uses `read_only: true`, tmpfs for `/tmp` and `$HOME`, `cap_drop: [ALL]` and `no-new-privileges`, so problems with the hardening show up now.
+  - `scripts/smoke.sh`: waits for the server, reads the token from the logs, and posts `examples/loom/small.yml` to `/api/render`.
+- **Verify:**
+  - `docker compose -f compose.dev.yaml up --build`, then open the logged URL and repeat the M1.8 manual check;
+  - `./scripts/smoke.sh` prints `PASS`;
+  - `docker compose -f compose.dev.yaml exec app id` shows a non-root uid;
+  - `curl -i http://<your LAN IP>:8000/` from another device fails, because the port is bound to localhost only.
+- **Commit:** `docker: multi-stage image and dev compose file`.
+
+### M1.11 CI (only once the project's GitHub repository exists; otherwise deferred)
+- **Build:** `.github/workflows/ci.yml`: back-end ruff, mypy and pytest (with Graphviz installed); front-end lint, test and build; Docker build + `scripts/smoke.sh`.
+- **Verify:** push a branch; the workflow is green. Locally, `act` is optional.
+- **Commit:** `ci: lint, test, build and Docker smoke test`.
+
+### M1.12 Wrap-up
+- **Build:** CLAUDE.md commands section replaced with the real, tested commands; PLAN.md M1 steps ticked; known gaps noted for M2.
+- **Verify:** follow CLAUDE.md's commands from a fresh clone; they all work.
+- **Commit:** `docs: M1 wrap-up`.
+
+**M1 exit criteria:**
+- In dev mode, locally and in Docker, typing YAML updates the diagram within about a second for `medium.yml`.
+- Bad YAML shows an error with its line and keeps the last diagram.
+- Saving writes to disk and detects conflicting changes.
+- All tests pass.
+- Requests without the launch token, or from a foreign Origin/Host, are rejected.
+
+## 5. Resolved questions
+
+| # | Question | Answer |
+|---|---|---|
+| Q1 | Which `.yml` files count as harnesses? | Only those in `loom/` (D13). |
+| Q2 | Images referenced by relative path | Supported in v0.1: `POST /api/render` takes an optional `path`; images resolve relative to it, sandboxed to `loom/`, and are inlined into the SVG as data URIs (D14). |
+| Q3 | WireViz version and examples | Pin the latest PyPI release (confirmed in M0.3). Examples come from the upstream WireViz tutorial and examples. |
+| Q4 | Test repository for the git spike | You create an empty private repo and a token with write access to it only. The spike handles the empty repo (first commit creates `main`). A local test git server comes in M3 for CI. |
+| Q5 | Repository workflow | Commit straight to `main`, one commit per step. CI (M1.11) waits until the project's GitHub repository exists. |
+
+## 6. Decision log
 
 | # | Decision | Why |
 |---|---|---|
 | D1 | **Explicit save** to the working tree (Ctrl/Cmd+S). The durable save is commit + push. Rendering always uses the editor content, saved or not. | Keeps commits meaningful; preview stays live without saving. |
 | D2 | **React** for the front-end. | Fastest start: Monaco, xterm.js and react-jsonschema-form all have mature React bindings. |
-| D3 | **Forms cover a core subset**: metadata, connectors, cables, simple connections, additional BOM items. Everything else stays editable in YAML and is preserved. | Full coverage of WireViz is a moving target; YAML is the escape hatch. |
-| D4 | **JSON Schema**: use an upstream one if it exists, otherwise generate it from WireViz's dataclasses plus a hand-written override file. | Tracks upstream changes with little manual work. |
-| D5 | **Stateless Docker, one command.** No volumes, read-only root filesystem, tmpfs for everything writable. | Easy to run anywhere; nothing to clean up or leak; the git remote is the storage. |
-| D6 | **Name LoomViz, license GPL-3.0.** | WireViz is GPL-3.0 and we import it; fully open source anyway. |
-| D7 | **Form edits happen in the browser** on the editor buffer, with the `yaml` npm package's Document API. ruamel.yaml stays on the back-end for validation and tests. | The editor buffer is the in-flight state; one place for edits avoids two YAML libraries fighting over formatting. M0 confirms the library round-trips cleanly. |
-| D8 | **v0.1 credentials: HTTPS username + git token**, or none for public repos. SSH keys in M6. No OAuth login. | Easiest: one form field and a small credential helper; no SSH agent, key handling or host-key checks. Works on all major hosts, and the same token enables PR APIs later. OAuth needs a registered app per host and a client secret a self-hosted container can't keep. |
-| D9 | **No pull requests in v0.1.** M6 adds GitHub and GitLab via API, a link elsewhere. | Keep v0.1 to the core loop. |
-| D10 | **v0.1 pushes to the cloned branch.** M6 adds "push to new branch". | Simplest flow; the terminal covers other branches meanwhile. |
-| D11 | **Unsaved editor content in `sessionStorage`.** | Survives a reload, disappears with the tab, so it fits "nothing persists". Never holds credentials. |
-
-## 3. Key implementation choices
-
-These cut across milestones; follow them from the first line of code.
-
-**Development mode.** `loomviz --dev-workspace <dir>` starts with a session already open on a local folder: no clone, no credentials, and ending the session doesn't delete anything. It exists for development and tests only; the Docker image never uses it. All other code paths are the same as in a real session.
-
-**Launch token.** Generated at startup (or taken from `LOOMVIZ_TOKEN`), printed as `http://127.0.0.1:<port>/?token=…`. The front-end moves it from the URL into `sessionStorage` and removes it from the address bar. It travels as an `Authorization: Bearer` header on HTTP and as a query parameter on WebSocket connects. Middleware also checks `Host` and `Origin`, because any web page the user visits can reach `127.0.0.1`.
-
-**Binding.** Outside Docker, the server refuses non-localhost addresses unless `LOOMVIZ_ALLOW_REMOTE=1`. The image sets this because it must listen on `0.0.0.0` inside the container; compose publishes the port on `127.0.0.1` only.
-
-**Git configuration and credentials.** Nothing goes into the repository's `.git/config`:
-- `GIT_CONFIG_GLOBAL=/run/loomviz/gitconfig` (tmpfs) holds the author identity and `credential.helper=/usr/local/bin/loomviz-credential`; `GIT_CONFIG_NOSYSTEM=1`. Both the back-end and the terminal use this environment, so git in the terminal works with no extra setup.
-- The credential helper reads the username and token from `/run/loomviz/credentials` (mode 0600, tmpfs).
-- Git commands started by LoomViz also pass `-c core.hooksPath=/dev/null -c protocol.allow=never -c protocol.https.allow=always`, run with `GIT_TERMINAL_PROMPT=0`, and never use `--recurse-submodules`.
-- Git output is scrubbed of the token before it reaches logs or the browser.
-
-**Work state.** The back-end computes "uncommitted" (`git status --porcelain`) and "unpushed" (ahead count against the upstream), and pushes updates over `WS /ws/session` after every save, commit, push, pull and detected file change. The browser adds "unsaved" from its own editor buffers.
-
-**Rendering.** wireviz runs in a small process pool with a per-render timeout, so a hung Graphviz call can be killed without affecting the server. Results are cached in an in-memory LRU keyed by SHA-256 of the YAML plus the WireViz version.
-
-**Files.** All paths go through one sandboxing function (no `..`, no absolute paths, no symlinks escaping the working tree). Writes are atomic (temp file + rename) and use `ETag`/`If-Match` to detect conflicts with changes made in the terminal.
-
-**End of session.** Order: browser checks unsaved buffers → `DELETE /api/session` checks uncommitted/unpushed → wipe credentials file and gitconfig → kill the PTY → delete the working tree → exit the process. Exiting stops the container (`restart: "no"`).
-
-## 4. Repository layout (target)
-
-```
-LoomViz/
-  SPEC.md  PLAN.md  README.md  LICENSE
-  Dockerfile                  # multi-stage: Node builds the front-end; Python runtime with Graphviz, git, bash
-  compose.yaml                # the one-command entry point; stateless
-  compose.dev.yaml            # dev override: source mounts, reload, Vite dev server
-  backend/
-    pyproject.toml            # uv-managed; wireviz pinned
-    loomviz/
-      __main__.py             # CLI: `loomviz` or `loomviz --dev-workspace <dir>`
-      app.py                  # app factory, static front-end, token + Origin/Host middleware
-      config.py               # port, token, paths, limits
-      session/
-        manager.py            # state machine: none -> cloning -> open -> ending
-        credentials.py        # gitconfig + credential file on tmpfs, wipe
-        git.py                # clone/status/diff/commit/pull/push, error mapping, output scrubbing
-        providers.py          # M6: PR APIs and links
-      bin/loomviz-credential  # git credential helper script
-      files.py                # file API, path sandboxing, atomic writes
-      render.py               # wireviz wrapper, process pool, cache
-      terminal.py             # PTY WebSocket
-      watch.py                # file-change detection
-      schema/                 # M5: JSON Schema generation + overrides
-    tests/
-  frontend/
-    package.json              # pnpm, Vite, React, TypeScript
-    src/
-      api/                    # typed client for /api and /ws
-      session/                # open-project form, header with work state, end-session flow
-      files/                  # file tree
-      editor/                 # Monaco wrapper
-      preview/                # SVG viewer, zoom/pan
-      changes/                # changes panel, diffs, commit/push
-      terminal/               # xterm.js panel
-      forms/                  # M5
-    tests/
-  testing/git-servers/        # CI: HTTP git server with basic auth (SSH server added in M6)
-  examples/                   # sample harnesses: small / medium / large
-  spike/                      # M0 scripts and results
-```
-
-## 5. Milestones
-
-Each milestone ends in a demo-able state with its exit criteria met. FR numbers refer to SPEC §8.
-
-### M0: Feasibility spike (no UI)
-
-Rendering and YAML:
-- [ ] Pin the latest WireViz release; record WireViz, Graphviz and Python versions in `spike/README.md`.
-- [ ] Script: YAML string in, SVG out through the wireviz Python API. Note the entry point and whether it needs temp files or an output directory.
-- [ ] Check whether wireviz keeps module-level state between calls (decides whether renders can reuse a worker process).
-- [ ] Collect sample harnesses in `examples/`: small (~3 connectors), medium (~20), large (~60+).
-- [ ] Benchmark cold and warm renders per size, parse vs Graphviz time, locally and in the container.
-- [ ] Round-trip tests with ruamel.yaml and with the `yaml` npm package: changing one value changes only that line and keeps comments and order (confirms D7).
-- [ ] Look for an upstream JSON Schema, or prototype generating one from the dataclasses (confirms D4).
-
-Stateless container and git:
-- [ ] Minimal image (`python:3.12-slim` + Graphviz, fonts, git), run read-only with tmpfs mounts as a non-root user. Confirm wireviz and git work (watch for tools writing to `$HOME` or `/tmp`).
-- [ ] Clone and push a private repo using the gitconfig + credential helper set-up from §3. Confirm the token is absent from `.git/config`, the remote URL and process listings.
-- [ ] Stop the container and inspect it (`docker diff`, `docker export`, `docker inspect`, `docker logs`): no working tree, no token.
-- [ ] Add `LICENSE` (GPL-3.0).
-
-Exit criteria: `spike/README.md` holds the benchmark table and each check's result; D4 and D7 confirmed; blockers raised with a proposed workaround.
-
-### M1: Render service + minimal page
-
-- [ ] Back-end skeleton: uv project, app factory, CLI with `--dev-workspace`.
-- [ ] Launch token, Origin/Host middleware and binding rules (§3), on every endpoint from day one.
-- [ ] `POST /api/render` with process pool, timeout, cache, and error-to-line mapping (FR-11 to FR-14).
-- [ ] File API: list, read, write, rename, delete with sandboxing, atomic writes and ETags.
-- [ ] Front-end skeleton (Vite + React + TypeScript): textarea + SVG panel, token handling.
-- [ ] Debounced render with stale-request cancelling (`AbortController` + request id); last good SVG stays on error.
-- [ ] First `Dockerfile` and `compose.dev.yaml`.
-- [ ] Tests: render success/error, cache, path sandboxing, ETag conflict, token and Origin rejection.
-
-Exit criteria: in dev mode, typing YAML updates the diagram; bad YAML shows an error and keeps the last diagram.
-
-### M2: Editor and file browser
-
-- [ ] Monaco + `monaco-yaml`, bundled locally; render errors as editor markers (FR-10).
-- [ ] File tree with create, rename, delete (FR-7).
-- [ ] Explicit save, dirty indicators, unsaved content in `sessionStorage` (FR-8).
-- [ ] Preview zoom, pan, fit-to-view (FR-15).
-- [ ] Layout from SPEC §7: file tree, editor, preview, resizable.
-- [ ] Vitest tests for debounce/cancel and save flow.
-
-Exit criteria: in dev mode, open, edit, save, rename and delete example files from the UI.
-
-### M3: Project session and save-to-remote
-
-Back-end:
-- [ ] Session state machine and `GET/POST/DELETE /api/session` (FR-1 to FR-5, FR-21).
-- [ ] Clone with progress streamed over `WS /ws/session`; URL validation (`https://` only); optional shallow clone; clear errors (FR-2).
-- [ ] Credentials and gitconfig on tmpfs per §3 (FR-4).
-- [ ] Git endpoints: status, diff, commit, pull (rebase), push to the cloned branch, typed push rejections (FR-17, FR-18).
-- [ ] Work-state updates over the WebSocket (FR-16).
-- [ ] End-session sequence from §3 (FR-21).
-
-Front-end:
-- [ ] Open-project form with token hints; clone progress and errors (FR-1, FR-2).
-- [ ] Session resume on reload (FR-5).
-- [ ] Header with branch and work state (FR-16).
-- [ ] Changes panel: file list, Monaco diff view, commit, push, "pull and retry" (FR-17, FR-18).
-- [ ] End-session dialog (FR-21) and `beforeunload` warning (FR-22).
-
-Docker:
-- [ ] Stateless `compose.yaml` (see §6).
-
-Tests:
-- [ ] Git flow against `testing/git-servers/` in CI: clone, commit, push, rejected push, pull and retry, bad credentials, read-only token.
-- [ ] Secret-leak test: after a session, search logs, `.git/config`, process environments and `docker diff` for the token.
-- [ ] Playwright end-to-end: open repo from the test server → edit → commit → push → end session.
-- [ ] Manual check against real GitHub and GitLab.
-
-Exit criteria: with `docker compose up`, open a private repo with a token, edit, commit, push, end the session, and the M0 inspection finds nothing.
-
-### M4: Terminal (completes v0.1)
-
-- [ ] `WS /ws/terminal`: bash in a PTY via `ptyprocess`, working tree as cwd, session git environment from §3 (FR-23, FR-24).
-- [ ] Resize, clean teardown on disconnect, reconnect notice; xterm.js bottom panel.
-- [ ] File-change detection with `watchfiles` (polling fallback), feeding the file tree, open editors and work state (FR-9).
-- [ ] Image includes bash, git, less and a small editor (nano).
-
-Exit criteria: SPEC §12 Definition of Done passes on macOS and Linux. Tag `v0.1.0`.
-
-### M5: Forms
-
-- [ ] Final JSON Schema (D4), served at `GET /api/schema`; also used for Monaco validation.
-- [ ] "Form" tab next to the YAML editor, for the D3 subset (FR-25).
-- [ ] Two-way sync per D7; read-only while YAML is invalid (FR-26).
-- [ ] Edits touch only the targeted node; unknown keys and comments survive (FR-28).
-- [ ] Custom widgets for pin lists, colour codes and the `connections` syntax.
-- [ ] Form edits go through the editor's undo stack.
-- [ ] Golden-file tests over every file in `examples/`.
-
-Exit criteria: build a small harness from an empty file with forms only; it renders, and untouched sections show no diff.
-
-### M6: SSH keys, new branches, pull requests
-
-- [ ] Spike first: SSH key in an in-container `ssh-agent`, loaded via stdin (with and without passphrase), in the read-only container; inspection finds no key.
-- [ ] SSH auth: `openssh-client` in the image, agent socket and `known_hosts` in `/run/loomviz`, `StrictHostKeyChecking=yes`, bundled host keys for GitHub/GitLab/Bitbucket, fingerprint confirmation otherwise; `ssh://` and scp-style URLs (FR-6).
-- [ ] Push to a new branch (FR-19).
-- [ ] Pull requests via GitHub and GitLab APIs, link fallback (FR-20).
-- [ ] Tests: SSH server in `testing/git-servers/`; provider APIs with mocked HTTP (`respx`); manual checks on GitHub and GitLab.
-
-Exit criteria: open a repo with an SSH key, push to a new branch, and open a pull request on GitHub and GitLab from the UI; nothing remains after ending the session.
-
-### M7: Polish and distribution (v1.0)
-
-- [ ] Export SVG, PNG, BOM (FR-29).
-- [ ] Multi-arch image (amd64 + arm64) published to GitHub Container Registry from CI on each tag; `compose.yaml` pulls it.
-- [ ] README: one-command quick start first, then the security model (what is kept where, the swap caveat, Ctrl+C skips the unpushed-work check), supported WireViz versions, development setup.
-- [ ] More pull request hosts (Bitbucket, Gitea/Forgejo) if users ask.
-
-Exit criteria: on a clean machine with only Docker, downloading `compose.yaml` and running `docker compose up` gives the full flow.
-
-## 6. Docker
-
-- **Image:** stage 1 (Node) builds the front-end; stage 2 (`python:3.12-slim`) installs Graphviz, fonts, git, bash, less and nano via apt, the back-end via uv, and the built front-end served by FastAPI. One container, one port, non-root user. `openssh-client` joins in M6.
-- **compose.yaml:**
-  - `ports: ["127.0.0.1:${PORT:-8000}:8000"]`
-  - `read_only: true`, no volumes
-  - tmpfs: `/workspace` (default 1 GB), `/run/loomviz`, `/tmp`, home directory
-  - `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, `restart: "no"`
-  - environment: `LOOMVIZ_ALLOW_REMOTE=1` (inside the container only), optional `LOOMVIZ_TOKEN`
-- **Logs:** Docker keeps logs after the container stops, so they contain only the launch URL and generic events: never credentials, file contents or (at the default level) repository URLs.
-- **Stopping:** "End session" exits the process and the container stops. Ctrl+C and `docker compose down` also stop it but skip the unpushed-work check. A stopped container holds no session data because tmpfs is cleared and the root filesystem is read-only; `docker compose down` removes it entirely.
-- **Development:** `docker compose -f compose.yaml -f compose.dev.yaml up` runs uvicorn with reload and the Vite dev server. Without Docker: `uv run loomviz --dev-workspace examples/` plus `pnpm dev`.
-
-## 7. Tooling and CI
-
-- Back-end: uv, ruff, mypy, pytest. Front-end: pnpm, ESLint, Prettier, Vitest. End-to-end: Playwright (from M3).
-- GitHub Actions on every PR: lint and unit tests; start `testing/git-servers/`; build the Docker image; run the end-to-end test against it. Render benchmark from M0 as a non-blocking report.
-
-## 8. Risks
-
-| Risk | Impact | Mitigation |
-|---|---|---|
-| Container stops (Ctrl+C, crash, reboot) before the user pushes | Lost work | Work state always visible; `beforeunload` warning; guided end-session flow; README warns that Ctrl+C skips the check. |
-| Push rejected: remote moved on, protected `main`, read-only token | User stuck at the end of a session (likely in v0.1, which always pushes to the cloned branch) | "Pull and retry"; clear message for protected branches and missing write access; terminal to push elsewhere; users can clone a working branch; M6 adds new branch + PR. |
-| Token leaks via logs, `.git/config`, process arguments, error messages | Account compromise | Credential helper + tmpfs gitconfig (§3); output scrubbing; secret-leak test in CI. |
-| Malicious repository content or URL (hooks, `ext::`/`file://` transports, submodules) | Commands run in the container | Protocol allow-list, hooks disabled, no submodules for LoomViz-started git commands. |
-| LoomViz reachable from other sites or machines (it offers a shell) | Remote code execution, stolen token | `127.0.0.1`-only port, launch token, Origin/Host checks from M1. |
-| WireViz API is CLI-oriented or keeps global state | Slow or flaky renders | M0 finds out; per-render temp dirs in worker processes. |
-| Graphviz slow on large harnesses | Laggy UI | Debounce, cancel, cache, worker processes, "rendering…" state. |
-| Large repositories | Clone fails or memory pressure | Configurable tmpfs size, shallow clone, clear error. |
-| Comment-preserving form edits are fragile | Noisy diffs, lost comments | D7: one editing path; golden-file tests over all examples. |
-| WireViz YAML (e.g. `connections`) hard to express as JSON Schema | Forms fall short | Custom widgets; YAML remains the fallback (D3). |
-| Upstream WireViz changes its format | Schema and forms drift | Pinned version; generated schema; planned upgrades. |
-
-## 9. Next steps
-
-1. Commit SPEC.md and PLAN.md.
-2. Create the GitHub repository (for CI and the container registry) and a private test repository of WireViz files.
-3. Start M0.
+| D3 | **Forms cover a core subset** (metadata, connectors, cables, simple connections, additional BOM items); everything else stays editable in YAML and is preserved. | Full WireViz coverage is a moving target; YAML is the escape hatch. |
+| D4 | **JSON Schema:** upstream if it exists, else generated from WireViz's dataclasses plus hand-written overrides. *To confirm in M0.7.* | Tracks upstream changes with little manual work. |
+| D5 | **Stateless Docker, one command.** No volumes, read-only root filesystem, tmpfs for everything writable. | Easy to run; nothing to clean up or leak; the git remote is the storage. |
+| D6 | **LoomViz, GPL-3.0.** | WireViz is GPL-3.0 and is imported as a library. |
+| D7 | **Form edits happen in the browser** on the editor buffer, with the `yaml` npm package's Document API; ruamel.yaml stays on the back-end for validation and tests. *To confirm in M0.6.* | One editing path avoids two YAML libraries fighting over formatting. |
+| D8 | **v0.1 credentials: HTTPS username + git token** (or none). SSH later; no OAuth. | Simplest to build, works on all major hosts, and enables PR APIs later. OAuth needs a client secret a self-hosted container can't keep. |
+| D9 | **No pull requests in v0.1.** | Keep v0.1 to the core loop. |
+| D10 | **v0.1 pushes to the cloned branch.** | Simplest flow; the terminal covers other branches. |
+| D11 | **Unsaved editor content in `sessionStorage`.** | Survives a reload, gone with the tab; never holds credentials. |
+| D12 | **SVG preview shown as `<img>` from a blob URL** (new, M1.8). | Diagrams are built from repository content; an `<img>` never runs scripts, so a malicious SVG can't reach the launch token. |
+| D13 | **Harness files live in a fixed `loom/` folder** at the repository root. The file tree and file API are sandboxed to it; the terminal and git see the whole repo. If it's missing, LoomViz offers to create it. The name is fixed in v0.1. | Separates harnesses from other YAML (CI workflows, compose files) without guessing, and gives the file API a tight sandbox root. |
+| D14 | **Images in the preview:** the render request carries the file's `path`; images resolve relative to it, are sandboxed to `loom/`, and are inlined into the SVG as data URIs. | The `<img>` preview (D12) can't load files by path, and inlining keeps the preview self-contained. |
