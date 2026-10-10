@@ -32,7 +32,7 @@ while [ $# -gt 0 ]; do
     --native) native=1 ;;
     --lan) lan=1 ;;
     --tls) tls=1 ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,/^[^#]/p' "$0" | sed -e '$d' -e '/^# shellcheck/d' -e 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
   shift

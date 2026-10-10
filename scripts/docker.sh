@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # Run LoomViz in Docker on a folder.
 #
-# Server mode (SPEC FR-36): one command, reachable from other computers on the network
-#   scripts/docker.sh <folder> --serve [--port N] [--tls CERT KEY] [--allow-host NAME]
-#       runs in the background, restarts after reboots, keeps the same URL, checks that it
-#       answers on the network and prints the URLs to open on other computers
-#   scripts/docker.sh --url     print those URLs again (and whether it's running)
-#   scripts/docker.sh --stop    stop the server (its URL/token is kept for next time)
+# Usage:
+#   scripts/docker.sh <folder> --serve [options]   server mode: in the background, reachable from
+#                                                  other computers, restarts after reboots
+#   scripts/docker.sh --url                        show the server's URLs (and whether it's running)
+#   scripts/docker.sh --stop                       stop the server
+#   scripts/docker.sh [folder] [options]           interactive: in this terminal until Ctrl+C
 #
-# Interactive: in this terminal until Ctrl+C
-#   scripts/docker.sh [folder] [--port N] [--lan] [--allow-host NAME] [--tls CERT KEY]
-#                     [--poll] [--selinux] [--detach]
+# Modes:
+#   --serve          server mode (SPEC FR-36): implies --lan and runs in the background; keeps
+#                    the same URL across restarts, checks it answers on the network and prints
+#                    the URLs to open on other computers
+#   --url            print the server's URLs again (alias: --status)
+#   --stop           stop the server; its URL/token is kept for the next --serve
 #
+# Options:
 #   folder           the folder to work on, ideally a git repository root (default: examples/)
 #   --port N         host port (default 8000)
 #   --lan            also reachable from other computers (default: this machine only)
@@ -19,7 +23,8 @@
 #   --tls CERT KEY   serve HTTPS with this certificate and private key (PEM files)
 #   --poll           poll for file changes (if edits made outside LoomViz don't show up)
 #   --selinux        label the mount for SELinux (Fedora, RHEL)
-#   --detach         run in the background; see the URL with: docker compose logs loomviz
+#   --detach         interactive mode only: run in the background (URL: docker compose logs loomviz)
+#   -h, --help       show this help
 #
 # Needs Docker with the Compose plugin (docker compose version).
 set -euo pipefail
@@ -40,7 +45,7 @@ tls_key=""
 detach=0
 mode=interactive  # interactive | serve | url | stop
 
-usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,/^[^#]/p' "$0" | sed -e '$d' -e '/^# shellcheck/d' -e 's/^# \{0,1\}//'; }
 
 if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
   folder="$1"
