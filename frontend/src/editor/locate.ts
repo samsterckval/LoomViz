@@ -21,7 +21,27 @@ export interface ComponentLocation {
 
 const GENERATED = /^__(.+)_\d+$/;
 
+/**
+ * Never throws: the editor text is often half-typed, and the yaml library throws on some broken
+ * documents (e.g. `<<: *mole` while typing an alias name). Broken YAML means "not found".
+ */
 export function locateComponent(yamlText: string, designator: string): ComponentLocation {
+  try {
+    return locateComponentUnsafe(yamlText, designator);
+  } catch {
+    const generated = GENERATED.exec(designator);
+    return {
+      designator,
+      section: null,
+      definition: null,
+      attributes: null,
+      usages: [],
+      generatedFrom: generated ? `${generated[1]}.` : null,
+    };
+  }
+}
+
+function locateComponentUnsafe(yamlText: string, designator: string): ComponentLocation {
   const lineCounter = new LineCounter();
   const doc = parseDocument(yamlText, { merge: true, lineCounter });
   const lines = yamlText.split("\n");
@@ -49,7 +69,7 @@ export function locateComponent(yamlText: string, designator: string): Component
         result.section = section;
         result.definition = at(pair.key.range[0]);
         const value = pair.value as Node | null;
-        const js = value ? value.toJS(doc) : null;
+        const js = resolve(value, doc);
         result.attributes = js && typeof js === "object" ? (js as Record<string, unknown>) : null;
       }
     }
@@ -88,6 +108,14 @@ function matches(value: unknown, name: string): boolean {
  * a connection-set entry (`- X1: [1-4]`, `- F.`).
  */
 export function locateAt(yamlText: string, offset: number): string | null {
+  try {
+    return locateAtUnsafe(yamlText, offset);
+  } catch {
+    return null; // broken YAML: nothing to highlight
+  }
+}
+
+function locateAtUnsafe(yamlText: string, offset: number): string | null {
   const doc = parseDocument(yamlText, { merge: true });
   // A node's range starts at its first character; count the line's indentation (and an entry's
   // "- ") as part of it, so a cursor at the start of the line still matches.
@@ -129,6 +157,15 @@ export function locateAt(yamlText: string, offset: number): string | null {
     }
   }
   return found;
+}
+
+/** The node as plain data, with aliases and << merges resolved; null if they're broken. */
+function resolve(node: Node | null, doc: Parameters<Node["toJS"]>[0]): unknown {
+  try {
+    return node ? node.toJS(doc) : null;
+  } catch {
+    return null;
+  }
 }
 
 function stripTemplateDot(name: string): string {
