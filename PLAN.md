@@ -3,7 +3,7 @@
 Status: 2026-10-10, for [SPEC.md](SPEC.md) v0.5.
 
 **Progress:**
-- Done: M0.1–M0.6 (results in `spike/README.md`) and M1.1–M1.9. A working prototype runs with `scripts/dev.sh` (see README).
+- Done: M0.1–M0.6 (results in `spike/README.md`), M1.1–M1.9, and M1.13–M1.15 (document view, diagram selection, per-wire selection). A working prototype runs with `scripts/dev.sh` (see README).
 - Deferred:
   - M0.7, JSON Schema: needed only for forms (M5);
   - M0.8–M0.10, locked-down container and git spike, plus M1.10, Docker image: Docker isn't installed on the development machine yet;
@@ -267,7 +267,7 @@ Built now on top of the M1 prototype, since they need no git work. M2 (Monaco) w
 | D9 | **No pull requests in v0.1.** | Keep v0.1 to the core loop. |
 | D10 | **v0.1 pushes to the cloned branch.** | Simplest flow; the terminal covers other branches. |
 | D11 | **Unsaved editor content in `sessionStorage`.** | Survives a reload, gone with the tab; never holds credentials. |
-| D12 | **SVG preview shown as an `<img>` (from a `data:` URL)**, never injected into the DOM (new, M1.8). | Diagrams are built from repository content; an `<img>` never runs scripts, so a malicious SVG can't reach the launch token. |
+| D12 | *Superseded by D15.* **SVG preview shown as an `<img>` (from a `data:` URL)**, never injected into the DOM (new, M1.8). | Diagrams are built from repository content; an `<img>` never runs scripts, so a malicious SVG can't reach the launch token. |
 | D13 | **Harness files live in a fixed `loom/` folder** at the repository root. The file tree and file API are sandboxed to it; the terminal and git see the whole repo. If it's missing, LoomViz offers to create it. The name is fixed in v0.1. | Separates harnesses from other YAML (CI workflows, compose files) without guessing, and gives the file API a tight sandbox root. |
 | D14 | **Images in the preview:** the render request carries the file's `path`; images resolve relative to it, are sandboxed to `loom/`, and are inlined into the SVG as data URIs. | The `<img>` preview (D12) can't load files by path, and inlining keeps the preview self-contained. |
 | D15 | **Interactive diagram:** the Diagram view inserts the SVG inline after sanitising it with DOMPurify (replaces D12's `<img>`, which can't be clicked into). The Document view stays isolated in an `<iframe sandbox>` with a blocking CSP. | Selection (FR-31) needs DOM access to the SVG; sanitising removes everything that could run or load code, so the launch token stays out of reach. |
