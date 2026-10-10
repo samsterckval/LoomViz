@@ -213,6 +213,35 @@ Dockerfile, compose.dev.yaml
 - All tests pass.
 - Requests without the launch token, or from a foreign Origin/Host, are rejected.
 
+### Added after M1: document view and selection (SPEC FR-30, FR-31)
+
+Built now on top of the M1 prototype, since they need no git work. M2 (Monaco) will later improve the jump-to-line part.
+
+#### M1.13 Document view (FR-30)
+- **Build:**
+  - The render worker builds the harness once, then produces both the SVG and, when asked (`html: true`), WireViz's HTML via its own `generate_html_output`, in a per-render temp folder. No second Graphviz run.
+  - Template names are restricted to `[A-Za-z0-9_-]+`. A matching `<name>.html` inside `loom/` (next to the file, sandboxed) is used first, then WireViz's built-ins; anything else falls back to the simple template with a warning.
+  - The temp path is scrubbed from the HTML.
+  - Front-end: a "Diagram | Document" toggle. The document is shown in an `<iframe sandbox>` (no scripts, no same-origin) via `srcdoc`, with a Content-Security-Policy that blocks all external loads.
+- **Verify:**
+  - `uv run pytest tests/test_render.py`: `html: true` returns a document with the BOM table and the din-6771 frame for `demo02.yml`; a template name like `../../x` is refused with a warning; no temp path appears in the output; the cache distinguishes `html` requests.
+  - `pnpm test`: the CSP is injected into the document.
+  - Manual: open `demo02.yml`, switch to Document; the A3 drawing frame with title block and the BOM are shown.
+- **Commit:** `render: WireViz HTML document view`.
+
+#### M1.14 Interactive diagram: select connectors and cables (FR-31)
+- **Build:**
+  - The Diagram view inserts the SVG inline after sanitising it with DOMPurify (SVG profile; no scripts, event handlers, `foreignObject` or external references; `data:` images kept). This replaces the `<img>` approach of D12 (see D15).
+  - Clicking a node finds its designator (from the SVG `<title>`) and looks it up in the editor text with the `yaml` package (`{ merge: true }`): where it's defined, where it's used in `connections`, and its resolved attributes.
+  - The editor scrolls to and selects the definition; an info panel lists attributes and usages (each usage clickable).
+- **Verify:** `pnpm test`: sanitiser tests (malicious SVG with `<script>`, `onload`, `javascript:` links and `foreignObject` comes out clean; `data:` images survive); locate tests on `demo02.yml` (X2 → line of `X2:` plus its usage; W1 → cable definition and its connection set; auto-generated ferrules → the `F.` line). Manual: click X1 and W3 in the diagram.
+- **Commit:** `frontend: select connectors and cables in the diagram`.
+
+#### M1.15 Per-wire selection (FR-31)
+- **Build:** Spike first: the edges WireViz gives Graphviz carry no wire number (four identical `X1:e--W1:w` titles for W1's four wires), so the worker tags each edge with `id="wire-<cable>-<n>"` before Graphviz runs. Then clicking a wire shows its cable, wire number, colour, gauge, length and both ends, and selects its connection-set line.
+- **Verify:** `uv run pytest`: every wire edge in `demo02.yml`'s SVG has a unique `wire-W<k>-<n>` id, and the rendered diagram is otherwise unchanged. `pnpm test`: a wire id resolves to the right cable, ends and colour. Manual: click the yellow wire of W1 → "W1 wire 3: YE, X1:3 SCL → X2:3 SCL".
+- **Commit:** `render: wire ids` and `frontend: select individual wires`.
+
 ## 5. Resolved questions
 
 | # | Question | Answer |
@@ -241,3 +270,4 @@ Dockerfile, compose.dev.yaml
 | D12 | **SVG preview shown as an `<img>` (from a `data:` URL)**, never injected into the DOM (new, M1.8). | Diagrams are built from repository content; an `<img>` never runs scripts, so a malicious SVG can't reach the launch token. |
 | D13 | **Harness files live in a fixed `loom/` folder** at the repository root. The file tree and file API are sandboxed to it; the terminal and git see the whole repo. If it's missing, LoomViz offers to create it. The name is fixed in v0.1. | Separates harnesses from other YAML (CI workflows, compose files) without guessing, and gives the file API a tight sandbox root. |
 | D14 | **Images in the preview:** the render request carries the file's `path`; images resolve relative to it, are sandboxed to `loom/`, and are inlined into the SVG as data URIs. | The `<img>` preview (D12) can't load files by path, and inlining keeps the preview self-contained. |
+| D15 | **Interactive diagram:** the Diagram view inserts the SVG inline after sanitising it with DOMPurify (replaces D12's `<img>`, which can't be clicked into). The Document view stays isolated in an `<iframe sandbox>` with a blocking CSP. | Selection (FR-31) needs DOM access to the SVG; sanitising removes everything that could run or load code, so the launch token stays out of reach. |

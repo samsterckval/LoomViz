@@ -1,6 +1,6 @@
 # SPEC: LoomViz, a web-based WireViz editor
 
-Status: draft v0.5 (2026-10-10). This file says **what** LoomViz does. [PLAN.md](PLAN.md) says how and in what order we build it, and records the reasoning behind each decision.
+Status: draft v0.6 (2026-10-10). v0.6 adds the document view (FR-30) and selecting diagram elements to find their YAML (FR-31, FR-32). This file says **what** LoomViz does. [PLAN.md](PLAN.md) says how and in what order we build it, and records the reasoning behind each decision.
 
 ## 1. Overview
 
@@ -79,10 +79,11 @@ One page, shown after a repository is open:
 +-------------------------------------------------------------------------+
 | LoomViz  repo-name  [branch: main]  (● 2 unpushed)  [Changes] [End session] |
 +-----------+-------------------------------+-----------------------------+
-| Files     | Editor: harness.yml            | Preview                     |
-|  a.yml    | (YAML; "Form" tab later)       | (SVG, zoom/pan;             |
+| Files     | Editor: harness.yml            | [Diagram | Document]        |
+|  a.yml    | (YAML; "Form" tab later)       | (SVG, zoom/pan, clickable;  |
 |  b.yml    |                                |  error banner on top,       |
 |  sub/     |                                |  last good diagram stays)   |
+|           |                                | Selection info panel        |
 +-----------+-------------------------------+-----------------------------+
 | Terminal (collapsible bottom panel)                                     |
 +-------------------------------------------------------------------------+
@@ -91,6 +92,7 @@ One page, shown after a repository is open:
 - Before a repository is open, the page shows only the "Open project" form.
 - "Changes" opens a panel with the changed files, a diff per file, a commit message box, and Commit and Push buttons.
 - "End session" runs the end-session flow (FR-21).
+- The preview has two views: **Diagram** (the interactive SVG) and **Document** (WireViz's own HTML page: diagram, BOM and, if the harness asks for it, a drawing frame with title block).
 
 ## 8. Functional requirements
 
@@ -114,6 +116,9 @@ One page, shown after a repository is open:
 - **FR-13** (v0.1): Render errors appear in a banner and in the editor, with line numbers where available. The last good diagram stays visible.
 - **FR-14** (v0.1): Renders are cached by content hash.
 - **FR-15** (v0.1): The preview supports zoom, pan and fit-to-view.
+- **FR-30** (v0.1): A **Document** view shows WireViz's HTML output for the current editor content: the diagram, the BOM table and, when `metadata.template` asks for one, the drawing template (e.g. `din-6771` with title block and sheet size). It updates like the diagram and is read-only. Only WireViz's built-in templates, or a template file inside `loom/`, can be used.
+- **FR-31** (v0.1): Clicking a connector, cable or wire in the Diagram view selects it: the editor jumps to and highlights its definition and the connection-set lines that use it, and an info panel shows its resolved attributes (after templates and `<<` merges). For a wire, the panel shows the cable, wire number, colour, gauge, length and both ends (connector, pin, pin label). Components WireViz generates itself (e.g. ferrules from `F.`) point to the connection-set line that creates them.
+- **FR-32** (later): The reverse: moving the editor cursor onto a component or connection highlights it in the diagram.
 
 ### 8.4 Save to remote
 - **FR-16** (v0.1): The header always shows the branch and the work state: unsaved, uncommitted, unpushed (with count) or all pushed.
@@ -144,7 +149,8 @@ One page, shown after a repository is open:
   - the port is published on `127.0.0.1` only;
   - every HTTP and WebSocket request needs the launch token and passes Origin/Host checks;
   - git operations started by LoomViz allow only `https` (plus `ssh` later), never run repository hooks, and don't fetch submodules;
-  - any non-local deployment needs real authentication first and is out of scope for v1.
+  - any non-local deployment needs real authentication first and is out of scope for v1;
+  - diagrams and documents are built from repository content, so they are treated as untrusted: the Diagram view inserts the SVG into the page only after sanitising it (no scripts, event handlers, external references or embedded HTML), and the Document view runs in a sandboxed frame with scripts and external loads blocked.
 - **Performance:** a typical harness (under ~20 connectors) renders in under 1 s end to end. Large harnesses may take a few seconds but never freeze the UI.
 - **Repository size:** up to the configured working-tree size (default 1 GB); shallow clone for larger repositories.
 - **Ease of use:** one command starts the complete app on a machine with only Docker.
@@ -208,7 +214,7 @@ Files and rendering (all file paths are relative to the loom folder and cannot l
 - `GET /api/files/{path}`: read a file (with `ETag`).
 - `PUT /api/files/{path}`: write a file (`If-Match` for conflict detection).
 - `POST /api/files/{path}/rename`, `DELETE /api/files/{path}`.
-- `POST /api/render`: `{yaml, path?}` → `{svg, warnings}` or `{error, line?}`. `path` (relative to `loom/`) is the file being edited; relative image paths resolve against it.
+- `POST /api/render`: `{yaml, path?, html?}` → `{svg, html?, warnings}` or `{error, line?}`. `path` (relative to `loom/`) is the file being edited; relative image paths and custom templates resolve against it. `html: true` also returns WireViz's HTML document (FR-30). SVG elements carry stable ids: `node-<designator>` for connectors and cables, `wire-<cable>-<n>` for wires (FR-31).
 - Later: `GET /api/schema` (forms), `POST /api/export` (export).
 
 WebSockets:
