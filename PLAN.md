@@ -28,7 +28,7 @@ Prerequisites: Docker, [uv](https://docs.astral.sh/uv/), Node 20+ with pnpm, Gra
 ### M0.1 Repository basics
 - **Build:** `LICENSE` (GPL-3.0 full text), `.gitignore` (Python, Node, `.env`, `spike/out/`), a one-paragraph `README.md` pointing to SPEC and PLAN.
 - **Verify:** `head -3 LICENSE` shows "GNU GENERAL PUBLIC LICENSE Version 3"; `git status` is clean after the commit.
-- **Commit:** `repo: add GPL-3.0 license, gitignore and README stub`, plus `CLAUDE.md`.
+- **Commit:** `repo: add GPL-3.0 license, gitignore and README stub`. (Done; CLAUDE.md went in with the docs commit.)
 
 ### M0.2 Example harnesses
 - **Build:** `examples/`, laid out like a real loom repository (D13): harness files in `examples/loom/`, plus a stray `examples/.github/workflows/ci.yml` and `examples/docker-compose.yml` that the file API must ignore. In `examples/loom/`:

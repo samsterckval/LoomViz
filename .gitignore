@@ -1,0 +1,30 @@
+# Secrets (never commit credentials)
+.env
+.env.*
+!.env.example
+*.token
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# Spike and render output
+spike/out/
+*.svg.tmp
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
