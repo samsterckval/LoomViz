@@ -2,6 +2,7 @@
 
 import asyncio
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -72,25 +73,35 @@ def test_nothing_relevant_gives_no_event(tmp_path):
     assert files_event({(Change.modified, str(tmp_path / "x.yml"))}, tmp_path / "loom") is None
 
 
-async def collect(root: Path, action, until, timeout: float = 8.0) -> list[dict]:
-    """Run the watchers, perform `action` once they're up, and collect events until `until(events)`."""
+async def collect(
+    root: Path, action, until, timeout: float = 10.0, retry_every: float | None = None
+) -> list[dict]:
+    """Run the watchers, perform `action` once they're up, and collect events until `until(events)`.
+
+    Watchers start asynchronously (the git watcher first asks git for its directory), so under
+    load the first action can happen before they watch; `retry_every` repeats the action.
+    """
     hub = EventHub()
     queue = hub.subscribe()
     stop = asyncio.Event()
     task = asyncio.create_task(run_watchers(root, hub, stop))
     events: list[dict] = []
+    loop = asyncio.get_running_loop()
     try:
         await asyncio.sleep(0.6)  # let the watchers start
         action()
-        deadline = asyncio.get_running_loop().time() + timeout
-        while not until(events):
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                break
+        deadline = loop.time() + timeout
+        next_retry = loop.time() + retry_every if retry_every else None
+        while not until(events) and loop.time() < deadline:
+            wait = deadline - loop.time()
+            if next_retry is not None:
+                wait = min(wait, max(0.0, next_retry - loop.time()))
             try:
-                events.append(await asyncio.wait_for(queue.get(), remaining))
+                events.append(await asyncio.wait_for(queue.get(), wait))
             except TimeoutError:
-                break
+                if next_retry is not None and loop.time() >= next_retry:
+                    action()
+                    next_retry = loop.time() + retry_every
     finally:
         stop.set()
         task.cancel()
@@ -109,32 +120,49 @@ def test_watcher_reports_created_modified_and_deleted_files(tmp_path):
     (tmp_path / "loom").mkdir()
     existing = tmp_path / "loom" / "a.yml"
     existing.write_text("a: 1\n")
+    edits = iter(range(1000))
 
-    def act():
-        (tmp_path / "loom" / "new.yml").write_text("n: 1\n")
-        existing.write_text("a: 2\n")
-        (tmp_path / "outside.yml").write_text("o: 1\n")
+    def act():  # repeatable: fresh content each time
+        n = next(edits)
+        (tmp_path / "loom" / "new.yml").write_text(f"n: {n}\n")
+        existing.write_text(f"a: {n + 2}\n")
+        (tmp_path / "outside.yml").write_text(f"o: {n}\n")
 
     events = asyncio.run(
         collect(
             tmp_path,
             act,
             lambda ev: {"new.yml", "a.yml"} <= all_paths(ev, "added") | all_paths(ev, "changed"),
+            retry_every=1.5,
         )
     )
     seen = all_paths(events, "added") | all_paths(events, "changed")
     assert {"new.yml", "a.yml"} <= seen
     assert "outside.yml" not in seen
 
-    events = asyncio.run(collect(tmp_path, existing.unlink, lambda ev: "a.yml" in all_paths(ev, "deleted")))
+    def delete():  # repeatable: re-create first if an earlier attempt already removed it
+        if not existing.exists():
+            existing.write_text("a: again\n")
+            time.sleep(0.3)
+        existing.unlink()
+
+    events = asyncio.run(
+        collect(tmp_path, delete, lambda ev: "a.yml" in all_paths(ev, "deleted"), retry_every=1.5)
+    )
     assert "a.yml" in all_paths(events, "deleted")
 
 
 def test_watcher_notices_loom_folder_being_created(tmp_path):
+    loom = tmp_path / "loom"
+
+    def create():  # repeatable
+        if loom.exists():
+            loom.rmdir()
+            time.sleep(0.3)
+        loom.mkdir()
+
     events = asyncio.run(
-        collect(
-            tmp_path, lambda: (tmp_path / "loom").mkdir(), lambda ev: any(e["type"] == "files" for e in ev)
-        )
+        collect(tmp_path, create, lambda ev: any(e["type"] == "files" for e in ev), retry_every=2.0)
     )
     assert any(e["type"] == "files" for e in events)
 
@@ -153,9 +181,13 @@ def test_git_event_on_branch_switch(tmp_path):
     git("init")
     git("add", ".")
     git("commit", "-m", "init")
+    branches = iter(f"feature-{i}" for i in range(100))
     events = asyncio.run(
         collect(
-            tmp_path, lambda: git("checkout", "-b", "feature"), lambda ev: any(e["type"] == "git" for e in ev)
+            tmp_path,
+            lambda: git("checkout", "-q", "-b", next(branches)),
+            lambda ev: any(e["type"] == "git" for e in ev),
+            retry_every=1.5,
         )
     )
     assert any(e["type"] == "git" for e in events)

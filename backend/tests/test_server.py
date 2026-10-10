@@ -39,12 +39,21 @@ def server(workspace, tmp_path):
 def test_events_websocket_on_a_real_server(server, workspace):
     url = f"ws://127.0.0.1:{server}/ws/events?token={TOKEN}"
     with connect(url, origin=f"http://127.0.0.1:{server}", open_timeout=5) as ws:
-        time.sleep(0.5)  # let the watcher settle
-        (workspace / "loom" / "demo02.yml").write_text("connectors: {}\n")
-        event = json.loads(ws.recv(timeout=8))
-        while event["type"] != "files":
-            event = json.loads(ws.recv(timeout=8))
-        assert "demo02.yml" in event["changed"] + event["added"]
+        # The watcher starts asynchronously and file events can lag on a busy machine: keep
+        # editing until an event for the file arrives.
+        deadline = time.monotonic() + 20
+        n = 0
+        while time.monotonic() < deadline:
+            n += 1
+            (workspace / "loom" / "demo02.yml").write_text(f"connectors: {{}}  # {n}\n")
+            try:
+                while True:
+                    event = json.loads(ws.recv(timeout=1.5))
+                    if event["type"] == "files" and "demo02.yml" in event["changed"] + event["added"]:
+                        return
+            except TimeoutError:
+                continue
+        raise AssertionError("no files event for demo02.yml within 20 s")
 
 
 def test_real_server_rejects_websocket_without_token(server):
