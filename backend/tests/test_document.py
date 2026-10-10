@@ -3,6 +3,7 @@
 import asyncio
 import io
 import re
+from pathlib import Path
 
 import pytest
 from pypdf import PdfReader
@@ -45,7 +46,8 @@ def test_page_css_follows_the_sheet_size():
     assert "A3 landscape" in page_css('<div id="frame" class="A3">')
     assert "A2 landscape" in page_css('<div id="frame" class="A2">')
     assert "A4 portrait" in page_css('<div id="frame" class="A4">')
-    assert "A4 portrait" in page_css("<html>no frame</html>") and "margin: 12mm" in page_css("<html></html>")
+    # The simple template (no frame): A4 landscape with margins, since diagrams are usually wide.
+    assert "A4 landscape" in page_css("<html>no frame</html>") and "margin: 12mm" in page_css("<html></html>")
 
 
 def render(client, bom_sheet: bool, text: str | None = None) -> str:
@@ -118,3 +120,39 @@ def test_pdf_refuses_everything_but_data_urls(workspace):
     assert "http://example.invalid/track.png" in result["refused"]
     assert "https://example.invalid/x.css" in result["refused"]
     assert b"root:" not in result["pdf"]
+
+
+# --- wide BOM in the simple template (regression: the BOM ran off the page) ---------------------
+
+WIDE_BOM = (Path(__file__).parent / "fixtures" / "wide_bom.yml").read_text()
+BOM_VALUES = ["999-888-777", "Cables R Us", "Label-ID-1", "WIRE3", "W1-RD", "1009", "Digimouse"]
+
+
+def test_bom_header_becomes_thead():
+    from loomviz.document import _bom_header_repeats
+
+    html = '<table class="bom">\n  <tr>\n    <th>Id</th>\n  </tr>\n  <tr>\n    <td>1</td>\n  </tr>\n</table>'
+    out = _bom_header_repeats(html)
+    assert "<thead><tr>" in out and "</thead><tbody>" in out and out.endswith("</tbody></table>")
+    reversed_bom = (
+        '<table class="bom">\n  <tr>\n    <td>1</td>\n  </tr>\n  <tr>\n    <th>Id</th>\n  </tr>\n</table>'
+    )
+    assert _bom_header_repeats(reversed_bom) == reversed_bom  # header at the bottom: left alone
+
+
+@pytest.mark.parametrize("bom_sheet", [False, True])
+def test_wide_bom_fits_the_page(client, bom_sheet):
+    response = client.post(
+        "/api/document.pdf", json={"yaml": WIDE_BOM, "path": "demo02.yml", "bom_sheet": bom_sheet}
+    )
+    assert response.status_code == 200
+    reader = PdfReader(io.BytesIO(response.content))
+    for page in reader.pages:  # A4 landscape
+        width_mm = float(page.mediabox.width) * 25.4 / 72
+        height_mm = float(page.mediabox.height) * 25.4 / 72
+        assert (round(width_mm), round(height_mm)) == (297, 210)
+    text = "\n".join(page.extract_text() for page in reader.pages)
+    for value in BOM_VALUES:  # every column, including the right-most ones, made it onto paper
+        assert value in text, value
+    bom_pages = [p for p in reader.pages if "Designators" in p.extract_text()]
+    assert all("Manufacturer" in p.extract_text() for p in bom_pages)  # header repeats on each BOM page

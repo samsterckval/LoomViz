@@ -29,8 +29,10 @@ DIAGRAM_PLACEHOLDER = "<!-- %diagram% -->"
 SHEET_CSS = (
     "<style>.loomviz-sheet + .loomviz-sheet { break-before: page; page-break-before: always; }"
     " @media screen { .loomviz-sheet + .loomviz-sheet { margin-top: 12mm; } }"
-    # The BOM sheet: the table sits where the drawing was; centre it.
-    " #diagram > table.bom { margin: 8mm auto 0; }</style>"
+    # The BOM sheet: the table sits where the drawing was; centre it, keep it within the frame
+    # (long values wrap rather than being cut off).
+    " #diagram > table.bom { margin: 8mm auto 0; max-width: 95%; }"
+    " #diagram > table.bom td { white-space: normal; }</style>"
 )
 
 # DIN 6771 frame classes -> paper (the frame plus the template's print margins fit these exactly).
@@ -128,7 +130,20 @@ def document_html(harness: Any, stem: str, custom_template: Path | None, bom_she
             html = _render_with_template(harness, stem, text, tmp, "loomviz-sheet")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    return html.replace(f"{tmp}/", "").replace(str(tmp), "")
+    return _bom_header_repeats(html.replace(f"{tmp}/", "").replace(str(tmp), ""))
+
+
+def _bom_header_repeats(html: str) -> str:
+    """Put the BOM's header row in a <thead>, so it repeats on every page a long BOM spans.
+
+    Only when the header is the first row (the reversed BOM next to the DIN title block has it
+    at the bottom, and is never split across pages).
+    """
+
+    def wrap(match: re.Match[str]) -> str:
+        return f"{match.group(1)}<thead>{match.group(2)}</thead><tbody>{match.group(3)}</tbody></table>"
+
+    return re.sub(r'(<table class="bom">\s*)(<tr>\s*<th\b.*?</tr>)(.*?)</table>', wrap, html, flags=re.S)
 
 
 def page_css(html: str) -> str:
@@ -146,7 +161,19 @@ def page_css(html: str) -> str:
             " .A2 #diagram svg { max-height: 340mm; }"
         )
         return f"@page {{ size: {size}; margin: 0 }} {drawing}"
-    return "@page { size: A4 portrait; margin: 12mm } svg { max-width: 100%; height: auto }"
+    # WireViz's simple template has no frame and browser-sized text. On paper: A4 landscape (WireViz
+    # diagrams are usually wide), print-sized text, the diagram scaled to fit a page, and a BOM
+    # table that stays within the page width (long values wrap) instead of running off the edge.
+    return (
+        "@page { size: A4 landscape; margin: 12mm }"
+        " body { font-size: 9pt; }"
+        " h1 { font-size: 16pt; margin: 0 0 3mm; } h2 { font-size: 12pt; margin: 4mm 0 2mm; }"
+        " #diagram svg { width: auto; height: auto; max-width: 100%; max-height: 150mm; }"
+        # table.bom, not #bom: on the BOM sheet the table sits where the diagram was.
+        " table.bom { width: 100%; border-collapse: collapse; }"
+        " table.bom th, table.bom td { font-size: 8pt; padding: 0.6mm 1.2mm;"
+        " white-space: normal; overflow-wrap: anywhere; }"
+    )
 
 
 def document_pdf(html: str) -> tuple[bytes, list[str]]:
