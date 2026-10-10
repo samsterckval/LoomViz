@@ -109,6 +109,8 @@ One page:
 - **FR-14** (v0.1): Renders are cached by content hash.
 - **FR-15** (v0.1): The diagram supports zoom (wheel, buttons), pan (drag) and fit-to-view. Dragging to pan doesn't count as a click.
 - **FR-30** (v0.1): A **Document** view shows WireViz's HTML output for the current editor content: the diagram, the BOM table and, when `metadata.template` asks for one, the drawing template (e.g. `din-6771` with title block and sheet size). It updates like the diagram and is read-only. Only WireViz's built-in templates, or a template file inside `loom/`, can be used.
+- **FR-37** (v0.1): **BOM on a separate sheet.** The Document view can put the BOM on its own sheet: sheet 1 has the drawing, sheet 2 the BOM in place of the drawing, both in the same template (frame, title block), numbered "1 of 2" and "2 of 2". A checkbox switches between one and two sheets; the choice is remembered.
+- **FR-38** (v0.1): **Download as PDF.** A button in the Document view downloads the document (one or two sheets, as shown) as `<file>.pdf`, at the template's paper size (DIN 6771 A4 portrait, A3 or A2 landscape; A4 for the simple template). The PDF is generated on the server from the current editor content; it never loads anything except images already embedded in the document.
 - **FR-31** (v0.1): Clicking a connector, cable or wire in the Diagram view selects it: the editor jumps to and highlights its definition (for a wire: the connection-set line that uses its cable), and an info panel shows its resolved attributes (after templates and `<<` merges) and every connection-set line that uses it. For a wire, the panel shows the cable, wire number, colour, gauge, length and both ends (connector, pin, pin label). Components WireViz generates itself (e.g. ferrules from `F.`) point to the entry that creates them.
 - **FR-32** (v0.1): The reverse: when the editor cursor is on a connector or cable (its definition or a connection-set entry), that component is highlighted in the diagram and shown in the info panel. On a cable, its wires are highlighted too.
 
@@ -167,6 +169,7 @@ User's folder (a git repository with loom/), mounted into the container when run
 | Front-end | React, TypeScript, Vite |
 | Editor | Monaco, bundled locally |
 | Sanitising | DOMPurify (SVG profile) |
+| PDF | WeasyPrint (HTML/CSS to PDF; needs Pango, in the Docker image; on macOS from Homebrew) |
 | Forms (later) | react-jsonschema-form or equivalent, from a JSON Schema |
 | Packaging | Native via `scripts/dev.sh`; one Docker image + `compose.yaml` |
 
