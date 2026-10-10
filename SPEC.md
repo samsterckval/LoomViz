@@ -93,6 +93,7 @@ One page:
 - **FR-33** (v0.1): LoomViz is started on a folder (`loomviz <folder>`). If the folder has no `loom/` subfolder, the UI says so and offers to create it.
 - **FR-34** (v0.1): The header shows the git branch and the number of files under `loom/` with uncommitted changes (modified, added, deleted or untracked), refreshed when files change. If the workspace isn't a git repository, it says so. LoomViz only ever runs read-only git commands.
 - **FR-35** (v0.1): **LAN access, opt-in.** Started with `--lan` (natively) or `scripts/docker.sh --lan`, LoomViz is reachable from other machines on the local network, at the machine's host names and IP addresses (detected, plus any the user adds). The launch token is still required, and requests addressed to any other host name are still refused. With a TLS certificate and key, LoomViz serves HTTPS; without them it serves plain HTTP and warns that the token travels unencrypted on the network. Without `--lan`, nothing changes: local access only.
+- **FR-36** (v0.1): **Server mode, one command.** `scripts/docker.sh <folder> --serve` starts LoomViz in Docker in the background with LAN access, keeps the same launch token across restarts (stored privately on the host), restarts it after a reboot, checks that it answers on the machine's LAN address, and prints the URLs to open from other computers. `--url` prints them again; `--stop` stops it.
 - **FR-1 to FR-6**: *Removed in v0.7* (open-project form, clone, credentials, SSH; see PLAN D16).
 
 ### 8.2 Files and editing

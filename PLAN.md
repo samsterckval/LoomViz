@@ -250,7 +250,22 @@ Fixes from that run go in as `docker: …` commits. When the smoke test passes, 
 
 **M3.7 status (2026-10-10):** done and tested natively. Unit tests cover allowed hosts, TLS settings and the CLI, and include HTTPS against a real server. On the Mac's LAN IP, plain and HTTPS access work, a made-up Host gets 403, and the UI smoke test passes via the LAN address. `scripts/docker-smoke.sh --native` passes with `--lan`, `--tls` and both. Docker parts (`BIND_ADDRESS`, `compose.tls.yaml`, `docker.sh --lan/--tls`) are validated with `compose config`, shellcheck and a stand-in `docker`, but not run on Docker. Found on the way: render workers outlived a killed server (fixed: they watch the parent), and file-watching tests were flaky under heavy load (fixed: they repeat the change).
 
+**Linux test result (2026-10-10):** `scripts/docker-smoke.sh` passed on the Linux machine (first as root, then as a normal user), as did `--lan` and `--lan --tls`. UI check skipped (no Node/Chrome there).
+
 **Linux test, LAN additions:** after the plain run, also `scripts/docker-smoke.sh --lan` and `scripts/docker-smoke.sh --lan --tls`, then `scripts/docker.sh <repo> --lan` and open the printed LAN URL from another machine on the network.
+
+### M3.8 Server mode: one command, reachable from other PCs (SPEC FR-36)
+- **Build:**
+  - `scripts/docker.sh <folder> --serve [--port N] [--tls CERT KEY] [--allow-host NAME]`:
+    - implies `--lan` and runs in the background with `restart: unless-stopped` (compose's restart policy becomes `${RESTART_POLICY:-no}`);
+    - keeps a launch token in `${XDG_STATE_HOME:-~/.local/state}/loomviz/token` (mode 600), so URLs stay valid across restarts and reboots;
+    - saves the run's settings next to it, so `--url` and `--stop` work without repeating the options;
+    - waits until the container is healthy, then fetches the page through the machine's LAN address to prove it answers there;
+    - prints "Open from another computer:" with the LAN URLs, plus troubleshooting hints if the check fails.
+  - `scripts/docker.sh --url` prints the URLs again (and whether it's running); `scripts/docker.sh --stop` stops and removes the container (the token stays).
+  - README: a "Run it as a server on your network" section, with the one command and a can't-connect checklist (IP address, firewall, `.local` names need avahi/mDNS, DHCP address changes).
+- **Verify:** shellcheck; the script's logic against a stand-in `docker` with a native LoomViz playing the container (so the LAN check and the printed URLs are real); on the Linux machine: `--serve`, open the URL from another PC, `docker restart`, reboot, `--url`, `--stop`.
+- **Commit:** `docker: server mode (--serve, --url, --stop)`.
 
 **M3 exit criteria:**
 - SPEC §12 holds in Docker on macOS (and Linux if available).
