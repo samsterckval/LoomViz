@@ -117,7 +117,8 @@ One page:
 ### 8.4 Git and terminal
 - **FR-16 to FR-24**: *Removed in v0.7* (work state, commit/push, pull requests, end session, terminal; see PLAN D16). FR-22's unsaved-edits warning lives on in FR-8.
 
-### 8.5 Forms (later)
+### 8.5 Forms
+- **FR-39** (v0.1): **Options editor.** A panel above the YAML editor edits the harness's `options` section as documented by WireViz ([syntax: options](https://github.com/wireviz/WireViz/blob/master/docs/syntax.md#options)): `bgcolor`, `bgcolor_node`, `bgcolor_connector`, `bgcolor_cable`, `bgcolor_bundle` (WireViz colour codes with swatches, or a hex colour), `color_mode` (8 choices), `fontname`, `mini_bom_mode` (default / on / off) and `template_separator`. Each field shows WireViz's description and default; resetting a field removes it from the file. Edits change only the lines concerned (comments and the rest of the file stay byte-identical) and go through the editor's undo. While the YAML doesn't parse, the panel is read-only. This is the first form; FR-25 to FR-28 extend the same approach to the other sections.
 - **FR-25**: Forms for metadata, connectors, cables, connections and additional BOM items. Other WireViz features remain editable in YAML.
 - **FR-26**: Form and YAML edits stay in sync both ways. While the YAML doesn't parse, the form is read-only.
 - **FR-27**: Forms are generated from a JSON Schema of the WireViz YAML.
