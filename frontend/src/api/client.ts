@@ -1,7 +1,25 @@
 // Typed client for the LoomViz back-end (SPEC §11). Every call carries the launch token.
 
+export interface WireEnd {
+  connector: string;
+  pin: number | string;
+  label: string | null;
+}
+
+/** One wire as WireViz resolved it, keyed "<cable>-<wire>" in RenderResult.wires. */
+export interface WireInfo {
+  cable: string;
+  wire: number | string;
+  color: string | null;
+  gauge: string | null;
+  length: string | null;
+  from: WireEnd | null;
+  to: WireEnd | null;
+}
+
 export type RenderResult =
-  { svg: string; html?: string; warnings: string[] } | { error: string; line: number | null; kind: string };
+  | { svg: string; html?: string; wires?: Record<string, WireInfo>; warnings: string[] }
+  | { error: string; line: number | null; kind: string };
 
 export interface FileList {
   loom_folder: string;

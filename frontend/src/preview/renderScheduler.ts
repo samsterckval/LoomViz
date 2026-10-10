@@ -4,11 +4,12 @@
 //   for the latest request (request ids), so a slow old render can never overwrite a newer one;
 // - keeps the last good SVG when a render fails.
 
-import type { RenderResult } from "../api/client";
+import type { RenderResult, WireInfo } from "../api/client";
 
 export interface PreviewState {
   svg: string | null; // last good diagram
   html: string | null; // last good WireViz document, when it was requested
+  wires: Record<string, WireInfo>; // wires of the last good diagram
   warnings: string[];
   error: { message: string; line: number | null } | null;
   rendering: boolean;
@@ -17,6 +18,7 @@ export interface PreviewState {
 export const initialPreview: PreviewState = {
   svg: null,
   html: null,
+  wires: {},
   warnings: [],
   error: null,
   rendering: false,
@@ -58,6 +60,7 @@ export function createRenderScheduler(options: {
         update({
           svg: result.svg,
           html: result.html ?? null,
+          wires: result.wires ?? {},
           warnings: result.warnings,
           error: null,
           rendering: false,

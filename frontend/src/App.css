@@ -234,3 +234,95 @@ button:disabled {
 .document.stale iframe {
   opacity: 0.6;
 }
+
+.diagram {
+  cursor: default;
+}
+
+.diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.diagram g.node,
+.diagram g.edge[id^="wire-"] {
+  cursor: pointer;
+}
+
+.diagram g.node:hover,
+.diagram g.edge[id^="wire-"]:hover {
+  filter: drop-shadow(0 0 2px rgba(47, 111, 219, 0.6));
+}
+
+.diagram g.selected {
+  filter: drop-shadow(0 0 3px #2f6fdb) drop-shadow(0 0 3px #2f6fdb);
+}
+
+.selection {
+  max-height: 40%;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  padding: 10px 16px;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.selection-header {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.selection-header .close {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.wire-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+button.link,
+button.location {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+}
+
+button.location code {
+  color: var(--fg);
+}
+
+.attributes {
+  border-collapse: collapse;
+  margin-top: 4px;
+}
+
+.attributes th,
+.attributes td {
+  text-align: left;
+  vertical-align: top;
+  padding: 1px 12px 1px 0;
+  font-weight: normal;
+}
+
+.attributes th {
+  color: var(--muted);
+  white-space: nowrap;
+}

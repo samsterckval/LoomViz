@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, createClient, type Client, type FileList, type Session } from "./api/client";
 import { takeLaunchToken } from "./api/token";
+import { locateComponent } from "./editor/locate";
 import { createRenderScheduler, initialPreview, type PreviewState } from "./preview/renderScheduler";
 import { Preview, type PreviewView } from "./preview/Preview";
+import { SelectionPanel } from "./preview/SelectionPanel";
+import type { Selection } from "./preview/selection";
 
 interface OpenFile {
   path: string;
@@ -37,6 +40,8 @@ function Editor({ client }: { client: Client }) {
   const [status, setStatus] = useState<Status>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [view, setView] = useState<PreviewView>("diagram");
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const editor = useRef<HTMLTextAreaElement>(null);
 
   const scheduler = useMemo(
     () => createRenderScheduler({ render: client.render, onUpdate: setPreview }),
@@ -52,6 +57,7 @@ function Editor({ client }: { client: Client }) {
       setOpen({ path, savedText: content, etag });
       setText(content);
       setStatus(null);
+      setSelection(null);
       scheduler.reset();
       void scheduler.now(content, path);
     },
@@ -109,6 +115,36 @@ function Editor({ client }: { client: Client }) {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty]);
 
+  // Select a line in the editor and scroll it into view (Monaco will do this properly in M2).
+  const revealLine = useCallback(
+    (line: number) => {
+      const area = editor.current;
+      if (!area) return;
+      const lines = text.split("\n");
+      const start = lines.slice(0, line - 1).reduce((n, l) => n + l.length + 1, 0);
+      const end = start + (lines[line - 1]?.length ?? 0);
+      area.focus({ preventScroll: true });
+      area.setSelectionRange(start, end);
+      const lineHeight = parseFloat(getComputedStyle(area).lineHeight) || 19.5;
+      area.scrollTop = Math.max(0, (line - 1) * lineHeight - area.clientHeight / 3);
+    },
+    [text],
+  );
+
+  const select = useCallback(
+    (next: Selection | null) => {
+      setSelection(next);
+      if (!next) return;
+      const designator = next.kind === "component" ? next.designator : preview.wires[next.key]?.cable;
+      if (!designator) return;
+      const found = locateComponent(text, designator);
+      const target =
+        next.kind === "wire" ? (found.usages[0] ?? found.definition) : (found.definition ?? found.usages[0]);
+      if (target) revealLine(target.line);
+    },
+    [preview.wires, revealLine, text],
+  );
+
   const switchTo = (path: string) => {
     if (dirty && !window.confirm(`Discard unsaved changes to ${open?.path}?`)) return;
     void openFile(path);
@@ -157,6 +193,7 @@ function Editor({ client }: { client: Client }) {
       ) : (
         <div className="panes">
           <textarea
+            ref={editor}
             className="editor"
             value={text}
             spellCheck={false}
@@ -169,6 +206,19 @@ function Editor({ client }: { client: Client }) {
           />
           <Preview
             state={preview}
+            selection={selection}
+            onSelect={select}
+            panel={
+              selection && (
+                <SelectionPanel
+                  selection={selection}
+                  yamlText={text}
+                  wires={preview.wires}
+                  onReveal={revealLine}
+                  onSelect={select}
+                />
+              )
+            }
             view={view}
             onViewChange={(next) => {
               setView(next);

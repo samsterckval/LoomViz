@@ -1,25 +1,38 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { withDocumentCsp } from "./document";
 import type { PreviewState } from "./renderScheduler";
+import { sanitizeSvg } from "./sanitize";
+import { elementsFor, selectionFromElement, type Selection } from "./selection";
 
 export type PreviewView = "diagram" | "document";
 
-// The SVG is built from repository content, so it is shown as an <img> rather than injected
-// into the page: scripts inside an <img> never run (PLAN D12).
+// The diagram is inserted into the page so it can be clicked, but only after sanitising
+// (PLAN D15): it is built from repository content.
 export function Preview({
   state,
   view,
   onViewChange,
+  selection,
+  onSelect,
+  panel,
 }: {
   state: PreviewState;
   view: PreviewView;
   onViewChange: (view: PreviewView) => void;
+  selection: Selection | null;
+  onSelect: (selection: Selection | null) => void;
+  panel?: ReactNode;
 }) {
-  // A data: URL needs no cleanup (unlike a blob: URL) and is just as inert inside <img>.
-  const url = useMemo(
-    () => (state.svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(state.svg)}` : null),
-    [state.svg],
-  );
+  const diagram = useRef<HTMLDivElement>(null);
+  const safeSvg = useMemo(() => (state.svg ? sanitizeSvg(state.svg) : null), [state.svg]);
+
+  // Highlight the selected element(s); re-applied whenever the diagram is re-rendered.
+  useEffect(() => {
+    const root = diagram.current;
+    if (!root) return;
+    root.querySelectorAll(".selected").forEach((el) => el.classList.remove("selected"));
+    if (selection) elementsFor(root, selection).forEach((el) => el.classList.add("selected"));
+  }, [safeSvg, selection, view]);
   const documentHtml = useMemo(() => (state.html ? withDocumentCsp(state.html) : null), [state.html]);
 
   return (
@@ -49,9 +62,23 @@ export function Preview({
       )}
       {state.rendering && <div className="rendering">rendering…</div>}
       {view === "diagram" ? (
-        <div className={`canvas${state.error ? " stale" : ""}`}>
-          {url ? <img src={url} alt="Harness diagram" /> : !state.error && <p>Rendering…</p>}
-        </div>
+        <>
+          <div className={`canvas${state.error ? " stale" : ""}`}>
+            {safeSvg ? (
+              <div
+                ref={diagram}
+                className="diagram"
+                role="img"
+                aria-label="Harness diagram; click a connector, cable or wire to find it in the YAML"
+                onClick={(e) => onSelect(selectionFromElement(e.target as Element))}
+                dangerouslySetInnerHTML={{ __html: safeSvg }}
+              />
+            ) : (
+              !state.error && <p>Rendering…</p>
+            )}
+          </div>
+          {panel}
+        </>
       ) : (
         <div className={`document${state.error ? " stale" : ""}`}>
           {documentHtml ? (
