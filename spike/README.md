@@ -8,8 +8,11 @@ uv sync                                          # Python 3.12 venv with wireviz
 uv run pytest                                    # all checks below as tests
 uv run python render.py ../examples/loom/demo02.yml > out/demo02.svg
 uv run python bench.py                           # benchmark tables
-uv run python roundtrip.py                       # round-trip report
+uv run python roundtrip.py                       # round-trip report (ruamel.yaml)
+(cd roundtrip-ts && pnpm install && pnpm start && pnpm test)   # round trip with the yaml npm package
 ```
+
+`uv run pytest` also renders the TypeScript spike's output files (skipped if `pnpm install` hasn't been run).
 
 ## Environment (2026-10-10)
 
@@ -19,6 +22,7 @@ uv run python roundtrip.py                       # round-trip report
 | Python | 3.12.15 (uv-managed) |
 | WireViz | 0.4.1 (latest PyPI release, July 2024) |
 | ruamel.yaml | 0.19.1 |
+| Node / `yaml` (npm) | 26.11.1 / 2.9.1 (pinned exactly) |
 | Graphviz | 2.50.0, **x86_64 build running under Rosetta** (`/usr/local/bin/dot`) |
 
 ## 1. Rendering through the library ✅
@@ -85,9 +89,26 @@ Findings:
      - flow lists gain spaces: `[1,5-7]` → `[1, 5-7]`;
      - an inline comment after a `<<: *alias` moves to its own line.
 
-**Consequence:** a back-end that writes form edits through ruamel would produce noisy diffs on the first save of nearly every real WireViz file, and could not open files using repeated merge keys at all. This supports D7 (form edits happen in the browser, not through ruamel), but only if the `yaml` npm package does better on both points. M0.6 must test exactly these two cases: repeated `<<` keys, and the bare-`-` nested connection style. ruamel remains usable on the back-end only for read-only work on files it can load, and must not be relied on to open every file.
+**Consequence:** a back-end that writes form edits through ruamel would produce noisy diffs on the first save of nearly every real WireViz file, and could not open files using repeated merge keys at all. The back-end must not write YAML through ruamel, and must not rely on it to open every file (wireviz itself uses PyYAML, which is what decides whether a file is valid).
+
+## 4. `yaml` npm package round trip ✅ (with lossless editing, not `toString()`)
+
+`cd roundtrip-ts && pnpm start`, tests in `roundtrip-ts/roundtrip.test.ts` (8 tests) and `tests/test_roundtrip_ts.py` (renders the outputs with wireviz).
+
+| Strategy | Unchanged file | Edit `W1.length` 0.2 → 0.25 | Add connector `X5` |
+|---|---|---|---|
+| A. `parseDocument` + `toString()` (best options: `lineWidth: 0, flowCollectionPadding: false, indentSeq: true`) | ❌ 21 changed lines | ❌ 23 changed lines | n/a |
+| B. CST (`Parser`, `CST.setScalarValue`, `CST.stringify`) | ✅ byte-identical | ✅ 1 line | not tried (CST has no structural insert helpers) |
+| C. Splice: `parseDocument` for structure, `node.range` offsets to edit the original text | ✅ (text untouched) | ✅ 1 line | ✅ 3 added lines, indentation matched |
+
+Findings:
+- **Repeated `<<` merge keys parse with `{ merge: true }`** (both merges apply, as in wireviz/PyYAML). With default options they are errors ("Map keys must be unique").
+- **Re-serialising the whole document (A) has the same problems as ruamel**: the bare-`-` nested connection style becomes `- - X1: …`, flow lists gain spaces after commas, and a comment after `templates:` moves to its own line.
+- **Lossless editing works (B and C).** Untouched text stays byte-identical, all comments survive, and every edited file renders correctly with wireviz: unchanged files give an identical SVG, edits show up in the diagram, and the added `X5` parses as a connector (merge applied).
+- **Splicing (C) is the practical approach.** The Document API gives the structure and each node's exact source offsets; edits replace or insert text at those offsets, so new text only needs to follow the surrounding indentation.
+
+**Consequence for D7:** confirmed with a refinement. Form edits happen in the browser with the `yaml` package, parsed with `{ merge: true }`, and are applied as **targeted text edits at node ranges**, never with `toString()` on the whole document. Each form operation (set scalar, add/remove/rename a key, add/remove a list item) becomes a text splice. Structural inserts need care with indentation, flow vs block style, and empty collections, but that's M5 work, and a golden-file test (unchanged lines stay byte-identical) catches mistakes.
 
 ## Not done yet
 
-- M0.6, TypeScript round trip with the `yaml` npm package. Blocked on this machine: `/usr/local/bin/node` aborts on start, and pnpm isn't installed. Needs a working Node 20+ (e.g. `brew install node pnpm`).
 - M0.7 (JSON Schema reconnaissance), M0.8 (read-only container and Docker benchmark), M0.9 (clone and push with a git token), M0.10 (leftover inspection).

@@ -224,7 +224,7 @@ Dockerfile, compose.dev.yaml
 | D4 | **JSON Schema:** upstream if it exists, else generated from WireViz's dataclasses plus hand-written overrides. *To confirm in M0.7.* | Tracks upstream changes with little manual work. |
 | D5 | **Stateless Docker, one command.** No volumes, read-only root filesystem, tmpfs for everything writable. | Easy to run; nothing to clean up or leak; the git remote is the storage. |
 | D6 | **LoomViz, GPL-3.0.** | WireViz is GPL-3.0 and is imported as a library. |
-| D7 | **Form edits happen in the browser** on the editor buffer, with the `yaml` npm package's Document API; ruamel.yaml stays on the back-end for validation and tests. *To confirm in M0.6.* | One editing path avoids two YAML libraries fighting over formatting. |
+| D7 | **Form edits happen in the browser** on the editor buffer with the `yaml` npm package, parsed with `{ merge: true }`, and applied as **targeted text splices at node ranges**, never by re-serialising the document (`toString()`). The back-end never writes YAML through ruamel.yaml. *Confirmed in M0.6 (spike/README.md §3–4).* | Re-serialising rewrites WireViz's usual connection layout and list spacing (both libraries); ruamel can't even load files with repeated `<<` keys. Splicing keeps untouched text byte-identical. |
 | D8 | **v0.1 credentials: HTTPS username + git token** (or none). SSH later; no OAuth. | Simplest to build, works on all major hosts, and enables PR APIs later. OAuth needs a client secret a self-hosted container can't keep. |
 | D9 | **No pull requests in v0.1.** | Keep v0.1 to the core loop. |
 | D10 | **v0.1 pushes to the cloned branch.** | Simplest flow; the terminal covers other branches. |

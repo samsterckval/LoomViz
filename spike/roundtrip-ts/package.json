@@ -1,0 +1,16 @@
+{
+  "name": "loomviz-spike-roundtrip-ts",
+  "private": true,
+  "type": "module",
+  "description": "M0.6: does the yaml npm package round-trip real WireViz files? (throwaway)",
+  "scripts": {
+    "start": "node roundtrip.ts",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}
