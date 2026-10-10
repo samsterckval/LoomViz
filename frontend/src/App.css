@@ -344,14 +344,6 @@ header .spacer {
   opacity: 0.8;
 }
 
-.rendering {
-  position: absolute;
-  top: 8px;
-  right: 16px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
 .canvas {
   flex: 1;
   min-height: 0;
@@ -448,12 +440,12 @@ header .spacer {
   background: var(--panel);
 }
 
-.tabs button {
+.tabs button[role="tab"] {
   border-color: transparent;
   background: transparent;
 }
 
-.tabs button[aria-selected="true"] {
+.tabs button[role="tab"][aria-selected="true"] {
   border-color: var(--border);
   background: var(--bg);
   font-weight: 600;
@@ -572,4 +564,36 @@ button.location code {
 
 .git .changed {
   color: var(--accent);
+}
+
+.render-controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.render-controls .primary {
+  padding: 4px 12px;
+}
+
+.render-controls kbd {
+  font: inherit;
+  font-size: 11px;
+  opacity: 0.75;
+  margin-left: 4px;
+}
+
+.render-controls label {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.out-of-date {
+  color: var(--accent);
+  font-size: 13px;
 }

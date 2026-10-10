@@ -10,6 +10,8 @@ export interface PreviewState {
   svg: string | null; // last good diagram
   html: string | null; // last good WireViz document, when it was requested
   wires: Record<string, WireInfo>; // wires of the last good diagram
+  /** The text of the latest render request: compare with the editor to know if the diagram is out of date. */
+  source: string | null;
   warnings: string[];
   error: { message: string; line: number | null } | null;
   rendering: boolean;
@@ -19,6 +21,7 @@ export const initialPreview: PreviewState = {
   svg: null,
   html: null,
   wires: {},
+  source: null,
   warnings: [],
   error: null,
   rendering: false,
@@ -52,7 +55,7 @@ export function createRenderScheduler(options: {
     const id = ++latestId;
     controller?.abort();
     controller = new AbortController();
-    update({ rendering: true });
+    update({ rendering: true, source: yaml });
     try {
       const result = await options.render(yaml, path, controller.signal, wantHtml);
       if (id !== latestId) return; // a newer render has started

@@ -17,6 +17,10 @@ export function Preview({
   onSelect,
   panel,
   fitKey,
+  outOfDate,
+  onRender,
+  autoRender,
+  onAutoRenderChange,
 }: {
   state: PreviewState;
   view: PreviewView;
@@ -26,7 +30,13 @@ export function Preview({
   panel?: ReactNode;
   /** Changes when another file is opened: the diagram fits to view again. */
   fitKey: string;
+  /** The editor text changed since the last render (FR-11). */
+  outOfDate: boolean;
+  onRender: () => void;
+  autoRender: boolean;
+  onAutoRenderChange: (on: boolean) => void;
 }) {
+  const shortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘↩" : "Ctrl+Enter";
   const diagram = useRef<HTMLDivElement>(null);
   const safeSvg = useMemo(() => (state.svg ? sanitizeSvg(state.svg) : null), [state.svg]);
 
@@ -47,6 +57,25 @@ export function Preview({
             {v === "diagram" ? "Diagram" : "Document"}
           </button>
         ))}
+        <span className="render-controls">
+          {outOfDate && !state.rendering && <span className="out-of-date">out of date</span>}
+          <button
+            className={outOfDate ? "primary" : undefined}
+            onClick={onRender}
+            disabled={state.rendering}
+            title={`Render the editor content (${shortcut})`}
+          >
+            {state.rendering ? "Rendering…" : "Render"} <kbd>{shortcut}</kbd>
+          </button>
+          <label title="Render automatically after each edit">
+            <input
+              type="checkbox"
+              checked={autoRender}
+              onChange={(e) => onAutoRenderChange(e.target.checked)}
+            />{" "}
+            Auto
+          </label>
+        </span>
       </div>
       {state.error && (
         <div className="banner error" role="alert">
@@ -64,7 +93,6 @@ export function Preview({
           ))}
         </div>
       )}
-      {state.rendering && <div className="rendering">rendering…</div>}
       {view === "diagram" ? (
         <>
           <div className={`canvas${state.error ? " stale" : ""}`}>

@@ -114,6 +114,21 @@ function Workbench({ client }: { client: Client }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [view, setView] = useState<PreviewView>("diagram");
   const [selection, setSelection] = useState<Selection | null>(null);
+  // Explicit rendering by default (FR-11, D20); "Auto" renders after each edit.
+  const [autoRender, setAutoRender] = useState(() => {
+    try {
+      return window.localStorage.getItem("loomviz.autoRender") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("loomviz.autoRender", autoRender ? "1" : "0");
+    } catch {
+      // not available: the choice just isn't remembered
+    }
+  }, [autoRender]);
   const editor = useRef<YamlEditorHandle>(null);
   const cursorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const storage = useMemo(() => safeSessionStorage(), []);
@@ -269,17 +284,26 @@ function Workbench({ client }: { client: Client }) {
     }
   }, [active, buffer, client, loadFile, refreshFiles]);
 
-  // Ctrl/Cmd+S saves.
+  const renderNow = useCallback(() => {
+    if (active) void scheduler.now(text, active);
+  }, [active, scheduler, text]);
+  const outOfDate = !!buffer && preview.source !== null && preview.source !== text;
+
+  // Ctrl/Cmd+S saves; Ctrl/Cmd+Enter renders (the editor has its own binding for the latter).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.key.toLowerCase() === "s") {
         event.preventDefault();
         void save();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        renderNow();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [save]);
+  }, [save, renderNow]);
 
   // Warn before leaving with unsaved edits in any file.
   useEffect(() => {
@@ -478,9 +502,10 @@ function Workbench({ client }: { client: Client }) {
               markers={markers}
               highlightLines={highlightLines}
               onCursor={onCursor}
+              onRenderShortcut={renderNow}
               onChange={(next) => {
                 dispatch({ type: "edited", path: active, text: next });
-                scheduler.schedule(next, active);
+                if (autoRender) scheduler.schedule(next, active);
               }}
             />
           ) : (
@@ -516,6 +541,13 @@ function Workbench({ client }: { client: Client }) {
             )
           }
           view={view}
+          outOfDate={outOfDate}
+          onRender={renderNow}
+          autoRender={autoRender}
+          onAutoRenderChange={(on) => {
+            setAutoRender(on);
+            if (on && outOfDate) renderNow();
+          }}
           onViewChange={(next) => {
             setView(next);
             scheduler.setWantHtml(next === "document"); // fetch the HTML only while it's on screen

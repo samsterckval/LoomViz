@@ -32,6 +32,8 @@ interface Props {
   onChange: (text: string) => void;
   /** Cursor moved (by the user) to this character offset. */
   onCursor?: (offset: number) => void;
+  /** Ctrl/Cmd+Enter pressed in the editor (render now). */
+  onRenderShortcut?: () => void;
   markers?: EditorMarker[];
   /** Lines to highlight (e.g. the selected component's definition and usages). */
   highlightLines?: number[];
@@ -50,17 +52,17 @@ const darkQuery =
 const themeName = () => (darkQuery?.matches ? "vs-dark" : "vs");
 
 export const YamlEditor = forwardRef<YamlEditorHandle, Props>(function YamlEditor(
-  { path, initialText, onChange, onCursor, markers = [], highlightLines = [] },
+  { path, initialText, onChange, onCursor, onRenderShortcut, markers = [], highlightLines = [] },
   ref,
 ) {
   const container = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const decorations = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
   const programmatic = useRef(false); // true while we change the text ourselves
-  const callbacks = useRef({ onChange, onCursor });
+  const callbacks = useRef({ onChange, onCursor, onRenderShortcut });
 
   useEffect(() => {
-    callbacks.current = { onChange, onCursor };
+    callbacks.current = { onChange, onCursor, onRenderShortcut };
   });
 
   // Create the editor once.
@@ -81,6 +83,10 @@ export const YamlEditor = forwardRef<YamlEditorHandle, Props>(function YamlEdito
       fixedOverflowWidgets: true,
     });
     editor.current = instance;
+    // Monaco handles Ctrl/Cmd+Enter itself (insert line below), so register "render" here.
+    instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () =>
+      callbacks.current.onRenderShortcut?.(),
+    );
     decorations.current = instance.createDecorationsCollection();
     const changes = instance.onDidChangeModelContent(() => {
       if (!programmatic.current) callbacks.current.onChange(instance.getValue());

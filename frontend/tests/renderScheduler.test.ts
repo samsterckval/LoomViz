@@ -89,6 +89,17 @@ describe("render scheduler", () => {
     expect(states[states.length - 1].error?.message).toContain("Failed to fetch");
   });
 
+  it("records which text the latest render was for", async () => {
+    const { calls, scheduler, latest } = setup();
+    void scheduler.now("first", null);
+    expect(latest().source).toBe("first");
+    calls[0].resolve({ svg: "<svg/>", warnings: [] });
+    await flush();
+    expect(latest().source).toBe("first");
+    scheduler.reset();
+    expect(latest().source).toBe(null);
+  });
+
   it("asks for the HTML document only when wanted", async () => {
     const flags: boolean[] = [];
     const scheduler = createRenderScheduler({
