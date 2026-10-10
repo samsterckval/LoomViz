@@ -1,0 +1,12 @@
+# SELinux systems (Fedora, RHEL): relabel the workspace mount so the container may use it.
+#   docker compose -f compose.yaml -f compose.selinux.yaml up --build   (or scripts/docker.sh --selinux)
+# "z" shares the label with other containers; the folder's files keep their content and owner.
+services:
+  loomviz:
+    volumes:
+      - type: bind
+        source: "${WORKSPACE:?set WORKSPACE to the folder with your harness files}"
+        target: /workspace
+        bind:
+          create_host_path: false
+          selinux: z

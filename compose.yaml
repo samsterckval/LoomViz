@@ -1,0 +1,35 @@
+# LoomViz in Docker (PLAN M3). The easy way: scripts/docker.sh <folder>.
+# By hand:  WORKSPACE=/path/to/folder LOOMVIZ_UID=$(id -u) LOOMVIZ_GID=$(id -g) docker compose up --build
+# (or put those in .env; see .env.example). Then open the URL in the output.
+name: loomviz
+
+services:
+  loomviz:
+    build: .
+    image: loomviz:dev
+    # Run as the host user, so files LoomViz writes into the folder belong to you.
+    # (Rootless Docker: use 0:0, which maps to you; scripts/docker.sh detects this.)
+    user: "${LOOMVIZ_UID:-1000}:${LOOMVIZ_GID:-1000}"
+    volumes:
+      # The folder to work on: mount the git repository root, so git status works.
+      # It must exist (no empty folder is created for a mistyped path).
+      # SELinux (Fedora, RHEL): add -f compose.selinux.yaml.
+      - type: bind
+        source: "${WORKSPACE:?set WORKSPACE to the folder with your harness files}"
+        target: /workspace
+        bind:
+          create_host_path: false
+    ports:
+      # Reachable from this machine only.
+      - "127.0.0.1:${PORT:-8000}:8000"
+    environment:
+      LOOMVIZ_PUBLIC_PORT: "${PORT:-8000}"  # the port the browser uses (Host/Origin checks, D18)
+      LOOMVIZ_TOKEN: "${LOOMVIZ_TOKEN:-}"  # empty: a new random launch token each start
+      LOOMVIZ_POLL: "${LOOMVIZ_POLL:-0}"  # 1: poll for file changes if events don't arrive
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    init: true  # reaps render workers stopped by the timeout
+    restart: "no"

@@ -17,6 +17,9 @@ RUN pnpm build
 FROM python:3.12-slim-trixie AS runtime
 
 # Graphviz renders the diagrams (fonts for its text); git reads the repository status.
+# Not version-pinned on purpose: Debian drops old package versions from its mirrors, so pins
+# break rebuilds; the base image tag fixes the Debian release.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends graphviz fonts-dejavu-core git \
     && rm -rf /var/lib/apt/lists/*
