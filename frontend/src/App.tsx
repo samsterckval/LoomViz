@@ -23,7 +23,9 @@ import {
   restoreBuffers,
   safeSessionStorage,
 } from "./workspace/buffers";
+import { Divider } from "./workspace/Divider";
 import { FileTree } from "./workspace/FileTree";
+import { clampLayout, loadLayout, saveLayout, type Layout } from "./workspace/layout";
 
 type Status = { kind: "info" | "error"; text: string } | null;
 
@@ -75,6 +77,20 @@ function Workbench({ client }: { client: Client }) {
   const editor = useRef<YamlEditorHandle>(null);
   const cursorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const storage = useMemo(() => safeSessionStorage(), []);
+  const [layout, setLayout] = useState<Layout>(() => clampLayout(loadLayout(), window.innerWidth));
+  const dragStart = useRef<Layout>(layout);
+  const latestLayout = useRef<Layout>(layout); // pointer events can outrun re-renders
+  useEffect(() => {
+    const onResize = () => setLayout((l) => clampLayout(l, window.innerWidth));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const resize = (patch: (start: Layout) => Layout, persist = false) => {
+    const next = clampLayout(patch(dragStart.current), window.innerWidth);
+    latestLayout.current = next;
+    setLayout(next);
+    if (persist) saveLayout(next);
+  };
 
   const scheduler = useMemo(
     () => createRenderScheduler({ render: client.render, onUpdate: setPreview }),
@@ -375,7 +391,10 @@ function Workbench({ client }: { client: Client }) {
         </span>
         {status && <span className={`status ${status.kind}`}>{status.text}</span>}
       </header>
-      <div className="panes">
+      <div
+        className="panes"
+        style={{ gridTemplateColumns: `${layout.tree}px 5px ${layout.editor}px 5px minmax(0, 1fr)` }}
+      >
         <FileTree
           files={files.files}
           active={active}
@@ -385,6 +404,13 @@ function Workbench({ client }: { client: Client }) {
           onCreate={createFile}
           onRename={renameFile}
           onDelete={(path) => void deleteFile(path)}
+        />
+        <Divider
+          label="Resize file tree"
+          onDragStart={() => (dragStart.current = layout)}
+          onDrag={(dx) => resize((l) => ({ ...l, tree: l.tree + dx }))}
+          onDragEnd={() => saveLayout(latestLayout.current)}
+          onStep={(dx) => ((dragStart.current = layout), resize((l) => ({ ...l, tree: l.tree + dx }), true))}
         />
         <section className="editor-pane" aria-label="Editor">
           {buffer?.conflict && (
@@ -425,6 +451,16 @@ function Workbench({ client }: { client: Client }) {
             </p>
           )}
         </section>
+        <Divider
+          label="Resize editor"
+          onDragStart={() => (dragStart.current = layout)}
+          onDrag={(dx) => resize((l) => ({ ...l, editor: l.editor + dx }))}
+          onDragEnd={() => saveLayout(latestLayout.current)}
+          onStep={(dx) => (
+            (dragStart.current = layout),
+            resize((l) => ({ ...l, editor: l.editor + dx }), true)
+          )}
+        />
         <Preview
           state={preview}
           fitKey={active ?? ""}

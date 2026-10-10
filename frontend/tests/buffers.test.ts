@@ -156,3 +156,12 @@ describe("tree", () => {
     expect(normaliseNewPath("  ")).toBeNull();
   });
 });
+
+describe("layout", () => {
+  it("keeps panes within bounds", async () => {
+    const { clampLayout } = await import("../src/workspace/layout");
+    expect(clampLayout({ tree: 50, editor: 100 }, 1400)).toEqual({ tree: 140, editor: 260 });
+    expect(clampLayout({ tree: 900, editor: 5000 }, 1400)).toEqual({ tree: 480, editor: 620 }); // preview keeps 300
+    expect(clampLayout({ tree: 220, editor: 520 }, 600)).toEqual({ tree: 220, editor: 260 }); // narrow window
+  });
+});

@@ -109,8 +109,19 @@ button:disabled {
 .panes {
   flex: 1;
   display: grid;
-  grid-template-columns: 220px minmax(320px, 38%) 1fr;
   min-height: 0;
+}
+
+.divider {
+  cursor: col-resize;
+  background: var(--border);
+  touch-action: none;
+}
+
+.divider:hover,
+.divider:focus-visible {
+  background: var(--accent);
+  outline: none;
 }
 
 header .spacer {
@@ -125,7 +136,6 @@ header .spacer {
 /* --- file tree --- */
 
 .file-tree {
-  border-right: 1px solid var(--border);
   background: var(--panel);
   overflow: auto;
   font-size: 14px;
@@ -239,7 +249,6 @@ header .spacer {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  border-right: 1px solid var(--border);
 }
 
 .editor-pane .editor {
@@ -391,8 +400,11 @@ header .spacer {
 
 @media (max-width: 720px) {
   .panes {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
     grid-template-rows: auto 45% 45%;
+  }
+  .divider {
+    display: none;
   }
   .editor {
     border-right: 0;
