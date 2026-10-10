@@ -25,8 +25,7 @@ import json
 import multiprocessing
 import os
 import re
-import shutil
-import tempfile
+import sys
 import time
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor
@@ -35,6 +34,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from .document import document_html, document_pdf
 
 WIREVIZ_VERSION = "0.4.1"
 COMPONENT_SECTIONS = ("connectors", "cables")
@@ -123,24 +124,6 @@ def check_template(data: dict[str, Any], base_dir: Path, loom: Path, warnings: l
     return None
 
 
-def _html_document(harness: Any, stem: str, custom_template: Path | None) -> str:
-    """WireViz's HTML output for an already-built harness (reuses its SVG; no second Graphviz run)."""
-    from wireviz.wv_bom import bom_list
-    from wireviz.wv_html import generate_html_output
-
-    tmp = Path(tempfile.mkdtemp(prefix="loomviz-html-"))
-    try:
-        base = tmp / stem
-        Path(f"{base}.tmp.svg").write_text(harness.svg, encoding="utf-8")
-        if custom_template:
-            shutil.copy(custom_template, tmp / custom_template.name)  # found first, next to "the file"
-        generate_html_output(base, bom_list(harness.bom()), harness.metadata, harness.options)
-        html = Path(f"{base}.html").read_text(encoding="utf-8")
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-    return html.replace(f"{tmp}/", "").replace(str(tmp), "")
-
-
 _ENDPOINT = re.compile(r'^(?:"((?:[^"\\]|\\.)*)"|([^":]+))(?::([^:]+))?(?::(?:[nsewc]{1,2}|_))?$')
 
 
@@ -200,7 +183,12 @@ def tag_wires(harness: Any) -> dict[str, dict[str, Any]]:
 
 
 def render_job(
-    yaml_text: str, base_dir: str, loom: str, want_html: bool = False, stem: str = "harness"
+    yaml_text: str,
+    base_dir: str,
+    loom: str,
+    want_html: bool = False,
+    stem: str = "harness",
+    bom_sheet: bool = False,
 ) -> dict[str, Any]:
     """Render in a worker. Returns {"svg", "html"?, "wires", "warnings"} or {"error", "line", "kind"}."""
     if os.environ.get("LOOMVIZ_TEST_HOOKS") == "1" and "# test:sleep" in yaml_text:
@@ -244,11 +232,25 @@ def render_job(
             wires = tag_wires(harness)
             result: dict[str, Any] = {"svg": harness.svg, "wires": wires}
             if want_html:
-                result["html"] = _html_document(harness, stem, custom_template)
+                result["html"] = document_html(harness, stem, custom_template, bom_sheet)
     except Exception as exc:  # wireviz raises bare Exception / TypeError for harness errors
         return {"error": str(exc) or type(exc).__name__, "line": None, "kind": "harness"}
     result["warnings"] = warnings + _group_warnings(captured.getvalue())
     return result
+
+
+def pdf_job(yaml_text: str, base_dir: str, loom: str, stem: str, bom_sheet: bool) -> dict[str, Any]:
+    """The document as PDF (FR-38). Returns {"pdf", "refused", "warnings"} or a render error."""
+    result = render_job(yaml_text, base_dir, loom, want_html=True, stem=stem, bom_sheet=bom_sheet)
+    if "error" in result:
+        return result
+    try:
+        pdf, refused = document_pdf(result["html"])
+    except OSError as exc:  # Pango/Cairo libraries missing (native installs)
+        return {"error": f"PDF export needs the Pango library: {exc}", "line": None, "kind": "pdf"}
+    except Exception as exc:
+        return {"error": f"Could not make the PDF: {exc}", "line": None, "kind": "pdf"}
+    return {"pdf": pdf, "refused": refused, "warnings": result["warnings"]}
 
 
 # --- line lookup for harness errors (main process) --------------------------------------------
@@ -309,6 +311,10 @@ class Renderer:
         self._pool = self._new_pool()
 
     def _new_pool(self) -> ProcessPoolExecutor:
+        if sys.platform == "darwin" and not os.environ.get("DYLD_FALLBACK_LIBRARY_PATH"):
+            # WeasyPrint (PDF) loads Pango from Homebrew, which macOS doesn't search by default.
+            # Workers are new processes, so setting it here is enough.
+            os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = "/opt/homebrew/lib:/usr/local/lib:/usr/lib"
         return ProcessPoolExecutor(
             max_workers=self.workers,
             mp_context=multiprocessing.get_context("spawn"),
@@ -334,7 +340,9 @@ class Renderer:
     def base_dir(self, path: Path | None) -> Path:
         return path.parent if path else self.loom
 
-    def cache_key(self, yaml_text: str, path: Path | None, html: bool = False) -> str:
+    def cache_key(
+        self, yaml_text: str, path: Path | None, html: bool = False, bom_sheet: bool = False
+    ) -> str:
         base = self.base_dir(path)
         images: list[Any] = []
         if "image" in yaml_text:
@@ -350,11 +358,15 @@ class Renderer:
             for candidate in sorted(base.glob("*.html")):
                 stat = candidate.stat()
                 images.append([candidate.name, stat.st_size, stat.st_mtime_ns])
-        material = json.dumps([yaml_text, str(path) if path else None, WIREVIZ_VERSION, images, html])
+        material = json.dumps(
+            [yaml_text, str(path) if path else None, WIREVIZ_VERSION, images, html, bom_sheet]
+        )
         return hashlib.sha256(material.encode()).hexdigest()
 
-    async def render(self, yaml_text: str, path: Path | None = None, html: bool = False) -> dict[str, Any]:
-        key = self.cache_key(yaml_text, path, html)
+    async def render(
+        self, yaml_text: str, path: Path | None = None, html: bool = False, bom_sheet: bool = False
+    ) -> dict[str, Any]:
+        key = self.cache_key(yaml_text, path, html, bom_sheet)
         if key in self.cache:
             self.cache.move_to_end(key)
             return self.cache[key]
@@ -362,7 +374,7 @@ class Renderer:
         self.jobs_run += 1
         stem = path.stem if path else "harness"
         future = self._pool.submit(
-            render_job, yaml_text, str(self.base_dir(path)), str(self.loom), html, stem
+            render_job, yaml_text, str(self.base_dir(path)), str(self.loom), html, stem, bom_sheet
         )
         try:
             result = await asyncio.wait_for(asyncio.wrap_future(future), timeout=self.timeout_s)
@@ -383,4 +395,24 @@ class Renderer:
             self.cache[key] = result
             if len(self.cache) > self.cache_size:
                 self.cache.popitem(last=False)
+        return result
+
+    async def pdf(self, yaml_text: str, path: Path | None, bom_sheet: bool) -> dict[str, Any]:
+        """The document as PDF (FR-38); not cached. Allows more time than a diagram render."""
+        stem = path.stem if path else "harness"
+        future = self._pool.submit(
+            pdf_job, yaml_text, str(self.base_dir(path)), str(self.loom), stem, bom_sheet
+        )
+        timeout = max(self.timeout_s, 60.0)
+        try:
+            result: dict[str, Any] = await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
+        except TimeoutError:
+            self._restart_pool()
+            message = f"Making the PDF took longer than {timeout:g} s and was stopped"
+            return {"error": message, "line": None, "kind": "timeout"}
+        except BrokenProcessPool:
+            self._restart_pool()
+            return {"error": "The render worker crashed; please try again", "line": None, "kind": "internal"}
+        if "error" in result and result.get("line") is None and result.get("kind") == "harness":
+            result["line"] = find_error_line(yaml_text, result["error"])
         return result

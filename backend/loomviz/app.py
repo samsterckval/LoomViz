@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,6 +30,7 @@ class RenderBody(BaseModel):
     yaml: str
     path: str | None = None
     html: bool = False
+    bom_sheet: bool = False  # document: BOM on a separate sheet (FR-37)
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -168,7 +170,22 @@ def create_app(settings: Settings) -> FastAPI:
         file_path: Path | None = None
         if body.path:
             file_path = open_workspace().resolve(body.path)
-        return await r.render(body.yaml, file_path, html=body.html)
+        return await r.render(body.yaml, file_path, html=body.html, bom_sheet=body.bom_sheet)
+
+    @app.post("/api/document.pdf")
+    async def document_pdf(body: RenderBody) -> Response:
+        """The document as a PDF download (FR-38)."""
+        r = open_renderer()
+        file_path = open_workspace().resolve(body.path) if body.path else None
+        result = await r.pdf(body.yaml, file_path, body.bom_sheet)
+        if "pdf" not in result:
+            return JSONResponse({"detail": result.get("error"), "line": result.get("line")}, status_code=422)
+        name = re.sub(r"[^A-Za-z0-9._-]+", "_", file_path.stem if file_path else "harness") + ".pdf"
+        return Response(
+            result["pdf"],
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
 
     # -- front-end (built files; no token needed, they contain no data) -------------------------
 

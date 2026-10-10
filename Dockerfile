@@ -16,12 +16,14 @@ RUN pnpm build
 # --- 2. Runtime --------------------------------------------------------------------------------
 FROM python:3.12-slim-trixie AS runtime
 
-# Graphviz renders the diagrams (fonts for its text); git reads the repository status.
+# Graphviz renders the diagrams (fonts for its text); git reads the repository status; Pango
+# (with HarfBuzz) is what WeasyPrint uses to make the PDF documents.
 # Not version-pinned on purpose: Debian drops old package versions from its mirrors, so pins
 # break rebuilds; the base image tag fixes the Debian release.
 # hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends graphviz fonts-dejavu-core git \
+       libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
     && rm -rf /var/lib/apt/lists/*
 
 # The mounted folder may be owned by a different uid than the container user; git would refuse
