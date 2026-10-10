@@ -109,8 +109,153 @@ button:disabled {
 .panes {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(320px, 40%) 1fr;
+  grid-template-columns: 220px minmax(320px, 38%) 1fr;
   min-height: 0;
+}
+
+header .spacer {
+  flex: 1;
+}
+
+.current-file {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+}
+
+/* --- file tree --- */
+
+.file-tree {
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  overflow: auto;
+  font-size: 14px;
+  padding-bottom: 12px;
+}
+
+.file-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tree-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+}
+
+.tree-header button {
+  font-size: 13px;
+  padding: 2px 8px;
+}
+
+.tree-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 3px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-row:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.tree-row.active {
+  background: rgba(47, 111, 219, 0.16);
+  font-weight: 600;
+}
+
+.tree-row.gone {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.tree-row .twisty {
+  display: inline-block;
+  width: 1em;
+  color: var(--muted);
+}
+
+.tree-row .dot {
+  color: var(--accent);
+}
+
+.tree-file {
+  position: relative;
+}
+
+.tree-actions {
+  position: absolute;
+  right: 4px;
+  top: 1px;
+  display: none;
+  gap: 2px;
+}
+
+.tree-file:hover .tree-actions,
+.tree-file:focus-within .tree-actions {
+  display: flex;
+}
+
+.tree-actions button {
+  border: 0;
+  background: var(--panel);
+  padding: 1px 4px;
+  font-size: 12px;
+}
+
+.tree-input {
+  padding: 2px 8px;
+}
+
+.tree-input input {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 4px;
+}
+
+.tree-error {
+  color: var(--error-fg);
+  font-size: 13px;
+  margin: 4px 8px;
+}
+
+.tree-empty {
+  padding: 0 8px;
+}
+
+/* --- editor pane --- */
+
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+}
+
+.editor-pane .editor {
+  flex: 1;
+  border-right: 0;
+}
+
+.editor-pane .message {
+  margin: 20vh auto;
+}
+
+.banner.conflict {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .editor {
@@ -197,7 +342,7 @@ button:disabled {
 @media (max-width: 720px) {
   .panes {
     grid-template-columns: 1fr;
-    grid-template-rows: 50% 50%;
+    grid-template-rows: auto 45% 45%;
   }
   .editor {
     border-right: 0;

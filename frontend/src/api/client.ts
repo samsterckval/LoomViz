@@ -97,6 +97,16 @@ export function createClient(token: string, fetchFn: typeof fetch = fetch.bind(g
       return response.headers.get("ETag") ?? "";
     },
     /** `html: true` also returns WireViz's HTML document (diagram, BOM, drawing template). */
+    async renameFile(path: string, to: string): Promise<void> {
+      await call(`/api/files/${filePath(path)}/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to }),
+      });
+    },
+    async deleteFile(path: string): Promise<void> {
+      await call(`/api/files/${filePath(path)}`, { method: "DELETE" });
+    },
     async render(
       yaml: string,
       path: string | null,

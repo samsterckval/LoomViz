@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   ApiError,
   createClient,
@@ -15,14 +15,34 @@ import { createRenderScheduler, initialPreview, type PreviewState } from "./prev
 import { Preview, type PreviewView } from "./preview/Preview";
 import { SelectionPanel } from "./preview/SelectionPanel";
 import type { Selection } from "./preview/selection";
+import {
+  buffersReducer,
+  isDirty,
+  persistBuffers,
+  restoreBuffers,
+  safeSessionStorage,
+} from "./workspace/buffers";
+import { FileTree } from "./workspace/FileTree";
 
-interface OpenFile {
-  path: string;
-  savedText: string;
-  etag: string;
-}
+type Status = { kind: "info" | "error"; text: string } | null;
 
-type Status = { kind: "info" | "error" | "conflict"; text: string } | null;
+const NEW_FILE_TEMPLATE = `# New harness. WireViz syntax: https://github.com/wireviz/WireViz/blob/master/docs/syntax.md
+connectors:
+  X1:
+    pincount: 2
+  X2:
+    pincount: 2
+
+cables:
+  W1:
+    wirecount: 2
+
+connections:
+  -
+    - X1: [1-2]
+    - W1: [1-2]
+    - X2: [1-2]
+`;
 
 export default function App() {
   const token = useMemo(() => takeLaunchToken(), []);
@@ -37,15 +57,15 @@ export default function App() {
       </main>
     );
   }
-  return <Editor client={client} />;
+  return <Workbench client={client} />;
 }
 
-function Editor({ client }: { client: Client }) {
+function Workbench({ client }: { client: Client }) {
   const [session, setSession] = useState<Session | null>(null);
   const [files, setFiles] = useState<FileList | null>(null);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
-  const [open, setOpen] = useState<OpenFile | null>(null);
-  const [text, setText] = useState("");
+  const [buffers, dispatch] = useReducer(buffersReducer, {});
+  const [active, setActive] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState>(initialPreview);
   const [status, setStatus] = useState<Status>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -53,6 +73,7 @@ function Editor({ client }: { client: Client }) {
   const [selection, setSelection] = useState<Selection | null>(null);
   const editor = useRef<YamlEditorHandle>(null);
   const cursorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const storage = useMemo(() => safeSessionStorage(), []);
 
   const scheduler = useMemo(
     () => createRenderScheduler({ render: client.render, onUpdate: setPreview }),
@@ -60,29 +81,71 @@ function Editor({ client }: { client: Client }) {
   );
   useEffect(() => () => scheduler.dispose(), [scheduler]);
 
-  const dirty = open !== null && text !== open.savedText;
+  const buffer = active ? buffers[active] : undefined;
+  const text = buffer?.text ?? "";
+  const dirtyPaths = useMemo(
+    () =>
+      new Set(
+        Object.values(buffers)
+          .filter(isDirty)
+          .map((b) => b.path),
+      ),
+    [buffers],
+  );
+  const deletedPaths = useMemo(
+    () =>
+      new Set(
+        Object.values(buffers)
+          .filter((b) => b.deletedOnDisk)
+          .map((b) => b.path),
+      ),
+    [buffers],
+  );
+
+  const refreshFiles = useCallback(() => client.listFiles().then(setFiles), [client]);
+  const refreshGit = useCallback(
+    () => client.gitStatus().then(setGitStatus, () => setGitStatus(null)),
+    [client],
+  );
+
+  /** Read a file from disk into its buffer (opening, or re-reading after a change on disk). */
+  const loadFile = useCallback(
+    async (path: string) => {
+      try {
+        const { text: content, etag } = await client.readFile(path);
+        dispatch({ type: "loaded", path, text: content, etag });
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) dispatch({ type: "deletedOnDisk", path });
+        else setStatus({ kind: "error", text: `Could not read ${path}: ${String(err)}` });
+      }
+    },
+    [client],
+  );
 
   const openFile = useCallback(
     async (path: string) => {
-      const { text: content, etag } = await client.readFile(path);
-      editor.current?.replaceText(path, content); // if the file's model already exists (reload)
-      setOpen({ path, savedText: content, etag });
-      setText(content);
-      setStatus(null);
+      setActive(path);
       setSelection(null);
+      setStatus(null);
       scheduler.reset();
-      void scheduler.now(content, path);
+      await loadFile(path);
     },
-    [client, scheduler],
+    [loadFile, scheduler],
   );
 
+  // Initial load: session, files, git status, and unsaved buffers from before a reload.
   useEffect(() => {
     Promise.all([client.session(), client.listFiles()])
       .then(([s, f]) => {
         setSession(s);
         setFiles(f);
-        void client.gitStatus().then(setGitStatus, () => setGitStatus(null));
-        if (f.files.length > 0) return openFile(f.files[0]);
+        void refreshGit();
+        const restored = restoreBuffers(storage, s.workspace ?? "");
+        if (Object.keys(restored.buffers).length) dispatch({ type: "restored", buffers: restored.buffers });
+        // Re-read every restored file, so edits based on an older version show a conflict.
+        for (const path of Object.keys(restored.buffers)) if (path !== restored.active) void loadFile(path);
+        const first = restored.active ?? f.files[0];
+        if (first) return openFile(first);
       })
       .catch((err: unknown) =>
         setLoadError(
@@ -91,22 +154,44 @@ function Editor({ client }: { client: Client }) {
             : `Could not reach the LoomViz back-end: ${String(err)}`,
         ),
       );
-  }, [client, openFile]);
+  }, [client, loadFile, openFile, refreshGit, storage]);
+
+  // Keep unsaved buffers in sessionStorage (FR-8).
+  useEffect(() => {
+    if (session?.workspace) persistBuffers(storage, session.workspace, buffers, active);
+  }, [buffers, active, session, storage]);
+
+  // Render when the active file changes or is reloaded; edits schedule their own renders.
+  const latestText = useRef(text);
+  useEffect(() => {
+    latestText.current = text;
+  });
+  const bufferVersion = buffer ? `${buffer.etag}|${buffer.savedText.length}|${buffer.conflict ? 1 : 0}` : "";
+  useEffect(() => {
+    if (active && bufferVersion) void scheduler.now(latestText.current, active);
+  }, [active, bufferVersion, scheduler]);
+
+  // Text changed outside the editor (reload, conflict resolved): update the editor's model.
+  useEffect(() => {
+    if (active && buffer) editor.current?.replaceText(active, buffer.text);
+  }, [active, buffer]);
 
   const save = useCallback(async () => {
-    if (!open || !dirty) return;
+    if (!active || !buffer || !isDirty(buffer)) return;
+    const content = buffer.text;
     try {
-      const etag = await client.writeFile(open.path, text, open.etag);
-      setOpen({ ...open, savedText: text, etag });
-      setStatus({ kind: "info", text: `Saved ${open.path}` });
+      const etag = await client.writeFile(active, content, buffer.etag || null);
+      dispatch({ type: "saved", path: active, text: content, etag });
+      setStatus({ kind: "info", text: `Saved ${active}` });
+      if (!buffer.etag) void refreshFiles(); // re-created a deleted file
     } catch (err) {
       if (err instanceof ApiError && err.status === 412) {
-        setStatus({ kind: "conflict", text: `${open.path} changed on disk since you opened it.` });
+        await loadFile(active); // shows the "changed on disk" choice
       } else {
         setStatus({ kind: "error", text: `Save failed: ${String(err)}` });
       }
     }
-  }, [client, open, text, dirty]);
+  }, [active, buffer, client, loadFile, refreshFiles]);
 
   // Ctrl/Cmd+S saves.
   useEffect(() => {
@@ -120,23 +205,78 @@ function Editor({ client }: { client: Client }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [save]);
 
-  // Warn before leaving with unsaved edits.
+  // Warn before leaving with unsaved edits in any file.
   useEffect(() => {
-    if (!dirty) return;
+    if (dirtyPaths.size === 0) return;
     const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [dirty]);
+  }, [dirtyPaths]);
+
+  // --- file tree actions (FR-7) -------------------------------------------------------------
+
+  const createFile = useCallback(
+    async (path: string): Promise<string | null> => {
+      try {
+        await client.writeFile(path, NEW_FILE_TEMPLATE, null);
+      } catch (err) {
+        return err instanceof ApiError && err.status === 412 ? `${path} already exists` : String(err);
+      }
+      await refreshFiles();
+      await openFile(path);
+      return null;
+    },
+    [client, openFile, refreshFiles],
+  );
+
+  const renameFile = useCallback(
+    async (from: string, to: string): Promise<string | null> => {
+      try {
+        await client.renameFile(from, to);
+      } catch (err) {
+        return err instanceof ApiError ? err.message : String(err);
+      }
+      dispatch({ type: "renamed", from, to });
+      editor.current?.dropModel(from);
+      if (active === from) setActive(to);
+      await refreshFiles();
+      return null;
+    },
+    [active, client, refreshFiles],
+  );
+
+  const deleteFile = useCallback(
+    async (path: string) => {
+      const warning = dirtyPaths.has(path) ? " Its unsaved edits will be lost." : "";
+      if (!window.confirm(`Delete ${path}?${warning}`)) return;
+      try {
+        if (!deletedPaths.has(path)) await client.deleteFile(path);
+      } catch (err) {
+        setStatus({ kind: "error", text: `Delete failed: ${String(err)}` });
+        return;
+      }
+      dispatch({ type: "closed", path });
+      editor.current?.dropModel(path);
+      const list = await client.listFiles();
+      setFiles(list);
+      if (active === path) {
+        const next = list.files[0];
+        if (next) void openFile(next);
+        else setActive(null);
+      }
+    },
+    [active, client, deletedPaths, dirtyPaths, openFile],
+  );
+
+  // --- selection between diagram and editor (FR-31, FR-32) -----------------------------------
 
   const revealLine = useCallback((line: number) => editor.current?.revealLine(line), []);
 
-  // Render errors as editor markers (FR-10, FR-13).
   const markers = useMemo<EditorMarker[]>(
     () => (preview.error?.line ? [{ line: preview.error.line, message: preview.error.message }] : []),
     [preview.error],
   );
 
-  // Lines of the selected component: its definition and every connection-set entry using it.
   const highlightLines = useMemo(() => {
     if (!selection) return [];
     const designator =
@@ -160,8 +300,6 @@ function Editor({ client }: { client: Client }) {
     [preview.wires, revealLine, text],
   );
 
-  // Editor cursor → diagram (FR-32): select the component under the cursor, without moving the
-  // cursor (unlike a click in the diagram). Debounced so typing and arrow keys stay smooth.
   const onCursor = useCallback(
     (offset: number) => {
       clearTimeout(cursorTimer.current);
@@ -178,13 +316,23 @@ function Editor({ client }: { client: Client }) {
   );
   useEffect(() => () => clearTimeout(cursorTimer.current), []);
 
-  const switchTo = (path: string) => {
-    if (dirty && !window.confirm(`Discard unsaved changes to ${open?.path}?`)) return;
-    void openFile(path);
-  };
-
   if (loadError) return <main className="message">{loadError}</main>;
   if (!session || !files) return <main className="message">Loading…</main>;
+
+  if (!files.loom_folder_exists) {
+    return (
+      <main className="message">
+        <h1>{session.workspace}</h1>
+        <p>
+          This folder has no <code>{files.loom_folder}/</code> subfolder yet. LoomViz keeps harness files
+          there.
+        </p>
+        <button onClick={() => void client.createLoomFolder().then(refreshFiles)}>
+          Create {files.loom_folder}/ folder
+        </button>
+      </main>
+    );
+  }
 
   return (
     <div className="app">
@@ -192,94 +340,89 @@ function Editor({ client }: { client: Client }) {
         <strong>LoomViz</strong>
         <span className="repo">{session.workspace}</span>
         <GitBadge status={gitStatus} />
-        <select
-          value={open?.path ?? ""}
-          onChange={(e) => switchTo(e.target.value)}
-          disabled={files.files.length === 0}
-          aria-label="Harness file"
-        >
-          {files.files.map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
-        <button onClick={() => void save()} disabled={!dirty} title="Save (Ctrl/Cmd+S)">
+        <span className="spacer" />
+        {active && <span className="current-file">{active}</span>}
+        <button onClick={() => void save()} disabled={!isDirty(buffer)} title="Save (Ctrl/Cmd+S)">
           Save
         </button>
-        <span className={dirty ? "dirty" : "clean"}>{open ? (dirty ? "● unsaved" : "saved") : ""}</span>
-        {status && (
-          <span className={`status ${status.kind}`}>
-            {status.text}
-            {status.kind === "conflict" && open && (
-              <button onClick={() => void openFile(open.path)}>Reload from disk (discard my edits)</button>
-            )}
-          </span>
-        )}
+        <span className={isDirty(buffer) ? "dirty" : "clean"}>
+          {buffer ? (isDirty(buffer) ? "● unsaved" : "saved") : ""}
+        </span>
+        {status && <span className={`status ${status.kind}`}>{status.text}</span>}
       </header>
-      {files.files.length === 0 ? (
-        <main className="message">
-          {files.loom_folder_exists ? (
-            `No .yml files in ${files.loom_folder}/ yet.`
-          ) : (
-            <>
-              <p>
-                This folder has no <code>{files.loom_folder}/</code> subfolder yet. LoomViz keeps harness
-                files there.
-              </p>
-              <button
-                onClick={() =>
-                  void client
-                    .createLoomFolder()
-                    .then(() => client.listFiles())
-                    .then(setFiles)
-                }
-              >
-                Create {files.loom_folder}/ folder
+      <div className="panes">
+        <FileTree
+          files={files.files}
+          active={active}
+          dirty={dirtyPaths}
+          deletedOnDisk={deletedPaths}
+          onOpen={(path) => void openFile(path)}
+          onCreate={createFile}
+          onRename={renameFile}
+          onDelete={(path) => void deleteFile(path)}
+        />
+        <section className="editor-pane" aria-label="Editor">
+          {buffer?.conflict && (
+            <div className="banner warning conflict" role="alert">
+              <span>
+                <strong>{active}</strong> changed on disk while you had unsaved edits.
+              </span>
+              <button onClick={() => dispatch({ type: "resolved", path: buffer.path, keep: "mine" })}>
+                Keep my edits
               </button>
-            </>
+              <button onClick={() => dispatch({ type: "resolved", path: buffer.path, keep: "disk" })}>
+                Reload from disk
+              </button>
+            </div>
           )}
-        </main>
-      ) : (
-        <div className="panes">
-          {open && (
+          {buffer?.deletedOnDisk && (
+            <div className="banner warning" role="alert">
+              <strong>{active}</strong> was deleted on disk. Save to re-create it, or delete it here to
+              discard your edits.
+            </div>
+          )}
+          {active && buffer ? (
             <YamlEditor
               ref={editor}
-              path={open.path}
-              initialText={text}
+              path={active}
+              initialText={buffer.text}
               markers={markers}
               highlightLines={highlightLines}
               onCursor={onCursor}
               onChange={(next) => {
-                setText(next);
-                scheduler.schedule(next, open.path);
+                dispatch({ type: "edited", path: active, text: next });
+                scheduler.schedule(next, active);
               }}
             />
+          ) : (
+            <p className="message">
+              {files.files.length ? "Pick a file on the left." : "No harness files yet: use + New."}
+            </p>
           )}
-          <Preview
-            state={preview}
-            selection={selection}
-            onSelect={select}
-            panel={
-              selection && (
-                <SelectionPanel
-                  selection={selection}
-                  yamlText={text}
-                  wires={preview.wires}
-                  onReveal={revealLine}
-                  onSelect={select}
-                />
-              )
-            }
-            view={view}
-            onViewChange={(next) => {
-              setView(next);
-              scheduler.setWantHtml(next === "document"); // fetch the HTML only while it's on screen
-              if (next === "document" && open) void scheduler.now(text, open.path);
-            }}
-          />
-        </div>
-      )}
+        </section>
+        <Preview
+          state={preview}
+          selection={selection}
+          onSelect={select}
+          panel={
+            selection && (
+              <SelectionPanel
+                selection={selection}
+                yamlText={text}
+                wires={preview.wires}
+                onReveal={revealLine}
+                onSelect={select}
+              />
+            )
+          }
+          view={view}
+          onViewChange={(next) => {
+            setView(next);
+            scheduler.setWantHtml(next === "document"); // fetch the HTML only while it's on screen
+            if (next === "document" && active) void scheduler.now(text, active);
+          }}
+        />
+      </div>
     </div>
   );
 }
