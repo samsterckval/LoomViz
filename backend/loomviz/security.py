@@ -39,12 +39,16 @@ def check_bind(settings: Settings) -> None:
 
 
 def allowed_hosts(settings: Settings) -> set[str]:
-    # The port the browser addresses: in Docker, the host-side port (D18).
-    return {f"{name}:{settings.browser_port}" for name in ("127.0.0.1", "localhost", "[::1]")}
+    """Host headers we accept: loopback names plus, for LAN access, the configured names (FR-35),
+    each with the port the browser addresses (in Docker, the host-side port, D18)."""
+    from .lan import host_for_url
+
+    names = ["127.0.0.1", "localhost", "[::1]", *(host_for_url(h) for h in settings.allowed_hosts)]
+    return {f"{name.lower()}:{settings.browser_port}" for name in names}
 
 
 def allowed_origins(settings: Settings) -> set[str]:
-    return {f"http://{host}" for host in allowed_hosts(settings)}
+    return {f"{settings.scheme}://{host}" for host in allowed_hosts(settings)}
 
 
 class SecurityMiddleware:
@@ -60,11 +64,11 @@ class SecurityMiddleware:
             return
 
         headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in scope["headers"]}
-        if headers.get("host") not in self.hosts:
+        if headers.get("host", "").lower() not in self.hosts:
             await self._deny(scope, receive, send, 403, "Host not allowed")
             return
         origin = headers.get("origin")
-        if origin is not None and origin not in self.origins:
+        if origin is not None and origin.lower() not in self.origins:
             await self._deny(scope, receive, send, 403, "Origin not allowed")
             return
         if not secrets.compare_digest(self._presented_token(scope, headers), self.token):

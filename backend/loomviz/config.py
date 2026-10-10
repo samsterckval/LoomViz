@@ -22,6 +22,15 @@ def _env_port(name: str) -> int | None:
     return int(value) if value else None
 
 
+def _env_list(name: str) -> list[str]:
+    return [item.strip().lower() for item in os.environ.get(name, "").split(",") if item.strip()]
+
+
+def _env_path(name: str) -> Path | None:
+    value = os.environ.get(name)
+    return Path(value) if value else None
+
+
 @dataclass
 class Settings:
     # The folder LoomViz serves (usually a git repository root with a loom/ folder). None only in tests.
@@ -31,6 +40,11 @@ class Settings:
     # The port the browser uses, if it differs from the one we listen on (Docker publishes the
     # container's port 8000 on a host port of the user's choice). Host/Origin checks use it.
     public_port: int | None = field(default_factory=lambda: _env_port("LOOMVIZ_PUBLIC_PORT"))
+    # Extra host names / IPs the browser may use (LAN access, FR-35), next to the loopback names.
+    allowed_hosts: list[str] = field(default_factory=lambda: _env_list("LOOMVIZ_ALLOWED_HOSTS"))
+    # Serve HTTPS with this certificate and key (both or neither).
+    tls_cert: Path | None = field(default_factory=lambda: _env_path("LOOMVIZ_TLS_CERT"))
+    tls_key: Path | None = field(default_factory=lambda: _env_path("LOOMVIZ_TLS_KEY"))
     token: str = field(default_factory=lambda: os.environ.get("LOOMVIZ_TOKEN") or secrets.token_urlsafe(32))
     allow_remote: bool = field(default_factory=lambda: os.environ.get("LOOMVIZ_ALLOW_REMOTE") == "1")
     frontend_dist: Path = field(default_factory=_default_frontend_dist)
@@ -43,7 +57,20 @@ class Settings:
         return self.public_port or self.port
 
     @property
+    def scheme(self) -> str:
+        return "https" if self.tls_cert and self.tls_key else "http"
+
+    @property
     def launch_url(self) -> str:
         # When listening on all interfaces (in a container), the browser still uses 127.0.0.1.
         host = "127.0.0.1" if self.host in ("0.0.0.0", "::") else self.host  # noqa: S104
-        return f"http://{host}:{self.browser_port}/?token={self.token}"
+        return f"{self.scheme}://{host}:{self.browser_port}/?token={self.token}"
+
+    @property
+    def lan_urls(self) -> list[str]:
+        from .lan import host_for_url
+
+        return [
+            f"{self.scheme}://{host_for_url(h)}:{self.browser_port}/?token={self.token}"
+            for h in self.allowed_hosts
+        ]
