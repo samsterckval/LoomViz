@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { withDocumentCsp } from "./document";
 import { PanZoom } from "./PanZoom";
 import type { PreviewState } from "./renderScheduler";
@@ -21,6 +21,9 @@ export function Preview({
   onRender,
   autoRender,
   onAutoRenderChange,
+  bomSheet,
+  onBomSheetChange,
+  onDownloadPdf,
 }: {
   state: PreviewState;
   view: PreviewView;
@@ -35,7 +38,20 @@ export function Preview({
   onRender: () => void;
   autoRender: boolean;
   onAutoRenderChange: (on: boolean) => void;
+  /** Document: BOM on its own sheet (FR-37). */
+  bomSheet: boolean;
+  onBomSheetChange: (on: boolean) => void;
+  /** Download the document as PDF (FR-38); resolves to an error message or null. */
+  onDownloadPdf: () => Promise<string | null>;
 }) {
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    setPdfError(null);
+    setPdfError(await onDownloadPdf());
+    setPdfBusy(false);
+  };
   const shortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘↩" : "Ctrl+Enter";
   const diagram = useRef<HTMLDivElement>(null);
   const safeSvg = useMemo(() => (state.svg ? sanitizeSvg(state.svg) : null), [state.svg]);
@@ -115,6 +131,24 @@ export function Preview({
         </>
       ) : (
         <div className={`document${state.error ? " stale" : ""}`}>
+          <div className="document-toolbar">
+            <label title="Sheet 1: the drawing; sheet 2: the bill of materials">
+              <input
+                type="checkbox"
+                checked={bomSheet}
+                onChange={(e) => onBomSheetChange(e.target.checked)}
+              />{" "}
+              BOM on a separate sheet
+            </label>
+            <button onClick={() => void downloadPdf()} disabled={pdfBusy || !documentHtml}>
+              {pdfBusy ? "Making PDF…" : "Download PDF"}
+            </button>
+            {pdfError && (
+              <span className="pdf-error" role="alert">
+                {pdfError}
+              </span>
+            )}
+          </div>
           {documentHtml ? (
             // sandbox="" : no scripts, no forms, no navigation, opaque origin (can't reach this page).
             <iframe sandbox="" srcDoc={documentHtml} title="WireViz document" />

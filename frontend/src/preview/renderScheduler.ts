@@ -32,6 +32,7 @@ type RenderFn = (
   path: string | null,
   signal: AbortSignal,
   html: boolean,
+  bomSheet: boolean,
 ) => Promise<RenderResult>;
 
 export function createRenderScheduler(options: {
@@ -45,6 +46,7 @@ export function createRenderScheduler(options: {
   let latestId = 0;
   let controller: AbortController | undefined;
   let wantHtml = false;
+  let bomSheet = false;
 
   const update = (patch: Partial<PreviewState>) => {
     state = { ...state, ...patch };
@@ -57,7 +59,7 @@ export function createRenderScheduler(options: {
     controller = new AbortController();
     update({ rendering: true, source: yaml });
     try {
-      const result = await options.render(yaml, path, controller.signal, wantHtml);
+      const result = await options.render(yaml, path, controller.signal, wantHtml, bomSheet);
       if (id !== latestId) return; // a newer render has started
       if ("svg" in result)
         update({
@@ -79,6 +81,10 @@ export function createRenderScheduler(options: {
     /** Whether renders should also fetch the HTML document (only while it's on screen). */
     setWantHtml(value: boolean): void {
       wantHtml = value;
+    },
+    /** Document: put the BOM on its own sheet (FR-37). */
+    setBomSheet(value: boolean): void {
+      bomSheet = value;
     },
     /** Call on every edit. */
     schedule(yaml: string, path: string | null): void {

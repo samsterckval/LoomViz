@@ -6,7 +6,7 @@ Status: v0.1 candidate: runs natively (macOS, Linux) and in Docker (tested on Li
 
 ## Try it
 
-Needs [uv](https://docs.astral.sh/uv/), [pnpm](https://pnpm.io) and [Graphviz](https://graphviz.org) (`brew install uv pnpm graphviz`).
+Needs [uv](https://docs.astral.sh/uv/), [pnpm](https://pnpm.io), [Graphviz](https://graphviz.org) and, for PDF export, Pango (`brew install uv pnpm graphviz pango`).
 
 ```bash
 scripts/dev.sh                  # the sample harness in examples/loom/
@@ -20,7 +20,8 @@ What you get:
 - **Editor:** Monaco with YAML highlighting; render errors are marked at their line.
 - **Live diagram:** updates as you type; zoom with the wheel, drag to pan, **Fit** to reset.
 - **Diagram ↔ YAML:** click a connector, cable or wire to jump to its YAML and see its details; put the cursor on a component in the YAML to highlight it in the diagram.
-- **Document view:** WireViz's own page with the BOM and, if the harness asks for one, a drawing frame (e.g. DIN 6771).
+- **Document view:** WireViz's own page with the BOM and, if the harness asks for one, a drawing frame (e.g. DIN 6771). Tick **BOM on a separate sheet** for a drawing sheet plus a BOM sheet ("1 of 2", "2 of 2"), and **Download PDF** to save it at the template's paper size (e.g. A3 landscape). PDF export uses WeasyPrint, which needs Pango: included in Docker; natively on macOS `brew install pango`.
+- **Rendering:** click **Render** (or Ctrl/Cmd+Enter) after editing; tick **Auto** to render as you type.
 - **Files:** a tree of `loom/` with new, rename and delete. Unsaved edits are marked ● and survive a page reload; Ctrl/Cmd+S saves.
 - **Works alongside git:** the header shows the branch and how many harness files have uncommitted changes. Files changed on disk (by `git pull`, a branch switch or another editor) reload automatically; if you have unsaved edits, you choose which version to keep. LoomViz itself never runs a git command that changes anything.
 

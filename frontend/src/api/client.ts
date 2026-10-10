@@ -103,6 +103,21 @@ export function createClient(token: string, fetchFn: typeof fetch = fetch.bind(g
       return response.headers.get("ETag") ?? "";
     },
     /** `html: true` also returns WireViz's HTML document (diagram, BOM, drawing template). */
+    /** The document as a PDF (FR-38). Throws ApiError with the render error on failure. */
+    async documentPdf(
+      yaml: string,
+      path: string | null,
+      bomSheet: boolean,
+    ): Promise<{ blob: Blob; filename: string }> {
+      const response = await call("/api/document.pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ yaml, path, bom_sheet: bomSheet }),
+      });
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "harness.pdf";
+      return { blob: await response.blob(), filename };
+    },
     async renameFile(path: string, to: string): Promise<void> {
       await call(`/api/files/${filePath(path)}/rename`, {
         method: "POST",
@@ -118,11 +133,12 @@ export function createClient(token: string, fetchFn: typeof fetch = fetch.bind(g
       path: string | null,
       signal?: AbortSignal,
       html = false,
+      bomSheet = false,
     ): Promise<RenderResult> {
       const response = await call("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ yaml, path, html }),
+        body: JSON.stringify({ yaml, path, html, bom_sheet: bomSheet }),
         signal,
       });
       return response.json();

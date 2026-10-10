@@ -114,6 +114,21 @@ function Workbench({ client }: { client: Client }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [view, setView] = useState<PreviewView>("diagram");
   const [selection, setSelection] = useState<Selection | null>(null);
+  // Document: BOM on its own sheet (FR-37), on by default and remembered.
+  const [bomSheet, setBomSheet] = useState(() => {
+    try {
+      return window.localStorage.getItem("loomviz.bomSheet") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("loomviz.bomSheet", bomSheet ? "1" : "0");
+    } catch {
+      // not available: the choice just isn't remembered
+    }
+  }, [bomSheet]);
   // Explicit rendering by default (FR-11, D20); "Auto" renders after each edit.
   const [autoRender, setAutoRender] = useState(() => {
     try {
@@ -151,6 +166,7 @@ function Workbench({ client }: { client: Client }) {
     () => createRenderScheduler({ render: client.render, onUpdate: setPreview }),
     [client],
   );
+  useEffect(() => scheduler.setBomSheet(bomSheet), [scheduler, bomSheet]);
   useEffect(() => () => scheduler.dispose(), [scheduler]);
 
   const buffer = active ? buffers[active] : undefined;
@@ -547,6 +563,27 @@ function Workbench({ client }: { client: Client }) {
           onAutoRenderChange={(on) => {
             setAutoRender(on);
             if (on && outOfDate) renderNow();
+          }}
+          bomSheet={bomSheet}
+          onBomSheetChange={(on) => {
+            setBomSheet(on);
+            scheduler.setBomSheet(on);
+            if (active) void scheduler.now(text, active);
+          }}
+          onDownloadPdf={async () => {
+            if (!active) return null;
+            try {
+              const { blob, filename } = await client.documentPdf(text, active, bomSheet);
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = filename;
+              link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 10_000);
+              return null;
+            } catch (err) {
+              return err instanceof ApiError ? err.message : `Download failed: ${String(err)}`;
+            }
           }}
           onViewChange={(next) => {
             setView(next);

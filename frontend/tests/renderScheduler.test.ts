@@ -101,10 +101,10 @@ describe("render scheduler", () => {
   });
 
   it("asks for the HTML document only when wanted", async () => {
-    const flags: boolean[] = [];
+    const flags: string[] = [];
     const scheduler = createRenderScheduler({
-      render: async (_y, _p, _s, html) => {
-        flags.push(html);
+      render: async (_y, _p, _s, html, bomSheet) => {
+        flags.push(`${html}/${bomSheet}`);
         return { svg: "<svg/>", html: html ? "<html></html>" : undefined, warnings: [] };
       },
       onUpdate: () => {},
@@ -112,7 +112,9 @@ describe("render scheduler", () => {
     await scheduler.now("a", null);
     scheduler.setWantHtml(true);
     await scheduler.now("a", null);
-    expect(flags).toEqual([false, true]);
+    scheduler.setBomSheet(true);
+    await scheduler.now("a", null);
+    expect(flags).toEqual(["false/false", "true/false", "true/true"]);
   });
 
   it("reset forgets the diagram and ignores in-flight results", async () => {
