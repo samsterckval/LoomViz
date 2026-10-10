@@ -179,6 +179,11 @@ class Renderer:
             process.terminate()
         old.shutdown(wait=False, cancel_futures=True)
 
+    def warm_up(self) -> None:
+        """Start every worker and import wireviz there, so the first real render is fast."""
+        for _ in range(self.workers):
+            self._pool.submit(render_job, "connectors: {}\n", str(self.loom), str(self.loom))
+
     def close(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)
 

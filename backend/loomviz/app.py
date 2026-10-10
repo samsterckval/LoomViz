@@ -41,6 +41,8 @@ def create_app(settings: Settings) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if renderer:
+            renderer.warm_up()
         yield
         if renderer:
             renderer.close()
