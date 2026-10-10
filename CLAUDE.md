@@ -13,12 +13,12 @@ Work one PLAN step at a time: build, run its Verify check, then make the one com
 
 ## Commands
 
-- Whole app: `scripts/dev.sh [folder] [--port N]` (builds the front-end, serves everything on 127.0.0.1:8000; default folder `examples/`).
+- Whole app: `scripts/dev.sh [folder] [--port N] [--lan] [--allow-host NAME] [--tls-cert F --tls-key F]` (builds the front-end, serves everything on 127.0.0.1:8000; default folder `examples/`).
 - UI smoke test against a running app on `examples/`: `node scripts/ui-smoke.mjs "<printed URL>"` (headless Chrome via the DevTools protocol; `$CHROME` overrides the browser).
 - Back-end (`backend/`, uv, Python 3.12): `uv run loomviz ../examples`; `uv run pytest` (single test: `uv run pytest tests/test_render.py::test_renders_demo`); `uv run ruff check . && uv run ruff format --check .`; `uv run mypy loomviz`. `tests/test_server.py` runs a real uvicorn server (the test client bypasses uvicorn, so it can't catch missing WebSocket support).
 - Front-end (`frontend/`, pnpm): `pnpm dev` (Vite on :5173, proxies `/api` and `/ws` to a back-end on :8000; open `http://localhost:5173/?token=<token the back-end printed>`); `pnpm test` (Vitest; single file: `pnpm vitest run tests/token.test.ts`); `pnpm lint` (ESLint + Prettier check); `pnpm build`. TypeScript is pinned to 6.x because typescript-eslint doesn't support TS 7 yet.
 - Spike (`spike/`): `uv run pytest`, `uv run python bench.py`; `spike/roundtrip-ts`: `pnpm test`.
-- Docker (Linux): `scripts/docker.sh [folder] [--port N] [--poll] [--selinux] [--detach]`; end-to-end check `scripts/docker-smoke.sh` (`--native` runs the same checks against a local server, for working on the script without Docker). Lint the scripts with shellcheck and the Dockerfile with hadolint when changing them.
+- Docker (Linux): `scripts/docker.sh [folder] [--port N] [--lan] [--allow-host N] [--tls CERT KEY] [--poll] [--selinux] [--detach]`; end-to-end check `scripts/docker-smoke.sh [--lan] [--tls]` (`--native` runs the same checks against a local server, for working on the script without Docker). Lint the scripts with shellcheck and the Dockerfile with hadolint when changing them.
 - In Docker the server listens on `0.0.0.0:8000` and `LOOMVIZ_PUBLIC_PORT` (the host port) drives the Host/Origin checks and the launch URL (D18); the image sets `LOOMVIZ_FRONTEND_DIST` and `LOOMVIZ_ALLOW_REMOTE=1`; `LOOMVIZ_POLL=1` switches file watching to polling.
 
 ## Architecture in brief
@@ -27,7 +27,7 @@ A FastAPI back-end (Python 3.12, `backend/loomviz/`) is started on a folder. It 
 
 Invariants that span many files and are easy to break:
 
-- **Security baseline.** Every `/api` and `/ws` request needs the launch token (Bearer header on HTTP, `?token=` on WebSockets) and passes Host/Origin checks (`security.py`); the server binds to loopback unless `LOOMVIZ_ALLOW_REMOTE=1`. Don't add endpoints outside `/api` or `/ws` that return data.
+- **Security baseline.** Every `/api` and `/ws` request needs the launch token (Bearer header on HTTP, `?token=` on WebSockets) and passes Host/Origin checks (`security.py`): loopback names plus, in LAN mode (`--lan` / `LOOMVIZ_ALLOWED_HOSTS`, FR-35), an explicit list of this machine's names and IPs, always with the browser-side port. Never accept arbitrary Host headers; that would reopen DNS rebinding. The server binds to loopback unless `--lan` or `LOOMVIZ_ALLOW_REMOTE=1`. TLS via `--tls-cert/--tls-key` (`LOOMVIZ_TLS_CERT/KEY`). Don't add endpoints outside `/api` or `/ws` that return data.
 - **File access** goes through `Workspace.resolve` in `files.py`, rooted at `<workspace>/loom/` (D13): no `..`, absolute paths, hidden files or symlinks escaping it. Writes are atomic with ETag/If-Match conflict detection. LoomViz never writes outside `loom/`.
 - **Git is read-only** (D16). Never add a git command that writes (commit, checkout, pull, config, …). Git runs with `GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0`, `-c core.fsmonitor=false`, a timeout and no shell.
 - **Rendering** (`render.py`) runs wireviz in a spawn-based process pool with a timeout and an LRU cache keyed by content (YAML, path, WireViz version, referenced images, html flag). It renders the editor buffer, not the saved file, and errors never blank the last good diagram. `wireviz.parse()` mutates its default `image_paths`, so always pass a fresh list. Images resolve against the edited file's folder, stay inside `loom/`, and are inlined as data URIs. WireViz template names are restricted (`check_template`) because WireViz resolves them as file paths.

@@ -248,6 +248,10 @@ Design points that shape the steps:
 4. If the machine has SELinux enforcing: `scripts/docker-smoke.sh --selinux`.
 Fixes from that run go in as `docker: …` commits. When the smoke test passes, tag `v0.1.0`.
 
+**M3.7 status (2026-10-10):** done and tested natively. Unit tests cover allowed hosts, TLS settings and the CLI, and include HTTPS against a real server. On the Mac's LAN IP, plain and HTTPS access work, a made-up Host gets 403, and the UI smoke test passes via the LAN address. `scripts/docker-smoke.sh --native` passes with `--lan`, `--tls` and both. Docker parts (`BIND_ADDRESS`, `compose.tls.yaml`, `docker.sh --lan/--tls`) are validated with `compose config`, shellcheck and a stand-in `docker`, but not run on Docker. Found on the way: render workers outlived a killed server (fixed: they watch the parent), and file-watching tests were flaky under heavy load (fixed: they repeat the change).
+
+**Linux test, LAN additions:** after the plain run, also `scripts/docker-smoke.sh --lan` and `scripts/docker-smoke.sh --lan --tls`, then `scripts/docker.sh <repo> --lan` and open the printed LAN URL from another machine on the network.
+
 **M3 exit criteria:**
 - SPEC §12 holds in Docker on macOS (and Linux if available).
 - `scripts/docker-smoke.sh` and all native tests pass.

@@ -24,7 +24,19 @@ What you get:
 - **Files:** a tree of `loom/` with new, rename and delete. Unsaved edits are marked ● and survive a page reload; Ctrl/Cmd+S saves.
 - **Works alongside git:** the header shows the branch and how many harness files have uncommitted changes. Files changed on disk (by `git pull`, a branch switch or another editor) reload automatically; if you have unsaved edits, you choose which version to keep. LoomViz itself never runs a git command that changes anything.
 
-LoomViz only listens on `127.0.0.1`, every request needs the launch token, and it only reads and writes files inside `loom/`.
+LoomViz listens on `127.0.0.1` only by default, every request needs the launch token, and it only reads and writes files inside `loom/`.
+
+## Open it from another machine (LAN)
+
+```bash
+scripts/dev.sh ~/my-harnesses --lan                                 # plain HTTP
+scripts/dev.sh ~/my-harnesses --lan --tls-cert box.pem --tls-key box-key.pem   # HTTPS
+```
+
+It prints a URL for each name and address this machine has on the network (e.g. `http://my-box.local:8000/?token=…`, `http://192.168.1.20:8000/?token=…`); open one of them on the other machine. Add names it didn't detect with `--allow-host NAME`. Requests addressed to any other name are refused, and the launch token is still required.
+
+- **Plain HTTP sends the launch token unencrypted** over your network. Fine on a network you trust (home); otherwise use HTTPS. [mkcert](https://github.com/FiloSottile/mkcert) makes a certificate your browsers trust: `mkcert my-box.local 192.168.1.20`.
+- **Alternative without LAN mode:** an SSH tunnel from the other machine, `ssh -L 8000:127.0.0.1:8000 you@my-box`, then open `http://127.0.0.1:8000/?token=…` there.
 
 ## Run in Docker (Linux)
 
@@ -41,7 +53,7 @@ Or without the script: copy `.env.example` to `.env`, fill in `WORKSPACE`, `LOOM
 Good to know:
 - **Mount the repository root.** Git status needs the `.git` folder inside the mounted folder; a subfolder of a repository, or a git worktree, shows "not a git repository".
 - **Files stay yours.** The container runs as your user, so saved files belong to you. With rootless Docker, `scripts/docker.sh` runs it as container root, which maps to you.
-- **Only this machine can reach it.** The port is published on `127.0.0.1`, and every request needs the launch token.
+- **Only this machine can reach it**, unless you add `--lan` (and `--tls CERT KEY` for HTTPS): `scripts/docker.sh ~/my-harnesses --lan --tls box.pem box-key.pem`. Note that Docker opens published ports past host firewalls such as ufw.
 - **Edits outside LoomViz not showing up?** Start with `--poll`.
 - **SELinux (Fedora, RHEL):** add `--selinux` (relabels the mount).
 
