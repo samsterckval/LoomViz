@@ -47,6 +47,46 @@ connections:
     - X2: [1-2]
 `;
 
+/** Shown when the workspace has no loom/ folder yet (SPEC FR-33). */
+function LoomFolderSetup({
+  workspace,
+  folder,
+  create,
+}: {
+  workspace: string;
+  folder: string;
+  create: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const onCreate = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await create();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : `Could not create ${folder}/: ${String(err)}`);
+      setBusy(false);
+    }
+  };
+  return (
+    <main className="message setup">
+      <h1>{workspace}</h1>
+      <p>
+        This folder has no <code>{folder}/</code> subfolder yet. LoomViz keeps harness files there.
+      </p>
+      <button className="primary" onClick={() => void onCreate()} disabled={busy}>
+        {busy ? "Creating…" : `Create ${folder}/ folder`}
+      </button>
+      {error && (
+        <p className="setup-error" role="alert">
+          {error}
+        </p>
+      )}
+    </main>
+  );
+}
+
 export default function App() {
   const token = useMemo(() => takeLaunchToken(), []);
   const client = useMemo(() => (token ? createClient(token) : null), [token]);
@@ -357,16 +397,14 @@ function Workbench({ client }: { client: Client }) {
 
   if (!files.loom_folder_exists) {
     return (
-      <main className="message">
-        <h1>{session.workspace}</h1>
-        <p>
-          This folder has no <code>{files.loom_folder}/</code> subfolder yet. LoomViz keeps harness files
-          there.
-        </p>
-        <button onClick={() => void client.createLoomFolder().then(refreshFiles)}>
-          Create {files.loom_folder}/ folder
-        </button>
-      </main>
+      <LoomFolderSetup
+        workspace={session.workspace ?? ""}
+        folder={files.loom_folder}
+        create={async () => {
+          await client.createLoomFolder();
+          await refreshFiles();
+        }}
+      />
     );
   }
 

@@ -118,3 +118,22 @@ def test_create_loom_folder(client, workspace):
     assert (workspace / "loom").is_dir()
     assert client.post("/api/loom").status_code == 200  # idempotent
     assert client.get("/api/files").json()["files"] == []
+
+
+def test_create_loom_folder_without_permission(client, workspace):
+    import os
+    import shutil
+    import stat
+
+    if os.geteuid() == 0:
+        import pytest
+
+        pytest.skip("root can write anywhere")
+    shutil.rmtree(workspace / "loom")
+    workspace.chmod(stat.S_IRUSR | stat.S_IXUSR)  # read-only, like a folder owned by someone else
+    try:
+        response = client.post("/api/loom")
+        assert response.status_code == 403
+        assert "No permission to create loom/" in response.json()["detail"]
+    finally:
+        workspace.chmod(stat.S_IRWXU)

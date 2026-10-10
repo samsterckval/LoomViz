@@ -82,8 +82,36 @@ button {
   color: var(--fg);
 }
 
+button {
+  cursor: pointer;
+}
+
+button:not(:disabled):hover {
+  border-color: var(--accent);
+}
+
 button:disabled {
   opacity: 0.5;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+  padding: 8px 16px;
+}
+
+button.primary:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
+.setup-error {
+  color: var(--error-fg);
+  background: var(--error-bg);
+  padding: 8px 12px;
+  border-radius: 6px;
 }
 
 .dirty {

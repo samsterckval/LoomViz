@@ -95,7 +95,17 @@ def create_app(settings: Settings) -> FastAPI:
     @app.post("/api/loom")
     def create_loom_folder() -> dict[str, Any]:
         ws = open_workspace()
-        ws.loom.mkdir(exist_ok=True)
+        try:
+            ws.loom.mkdir(exist_ok=True)
+        except PermissionError as exc:
+            # Typical in Docker: the mounted folder belongs to another user (e.g. created as root).
+            raise HTTPException(
+                403,
+                f"No permission to create {LOOM_FOLDER}/ in {ws.root.name}: the folder belongs to another "
+                f"user. Create {LOOM_FOLDER}/ yourself, or fix the folder's owner.",
+            ) from exc
+        except OSError as exc:
+            raise HTTPException(500, f"Could not create {LOOM_FOLDER}/: {exc.strerror or exc}") from exc
         return {"loom_folder": LOOM_FOLDER, "loom_folder_exists": True}
 
     @app.get("/api/git/status")
